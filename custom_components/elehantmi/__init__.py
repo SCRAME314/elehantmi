@@ -39,7 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["scanner"] = scanner
         await scanner.start()
         # Остановка сканера при выгрузке последней конфигурации
-        entry.async_on_unload(lambda: asyncio.create_task(scanner.stop()))
+        entry.async_on_unload(scanner.stop())
         _LOGGER.info("Global Elehant history scanner created and started")
     
     # --- 2. РЕГИСТРАЦИЯ УСТРОЙСТВ (счетчиков) из конфига ---

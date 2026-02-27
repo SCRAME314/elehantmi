@@ -25,7 +25,7 @@ CONF_SELECTED_BT_ADAPTER = "selected_bt_adapter"
 # Default values
 DEFAULT_SCAN_INTERVAL = 60
 DEFAULT_DEVICE_NAME = "Elehant Meter"
-DEFAULT_SCAN_TIMEOUT = 60  # Таймаут для ручного поиска, секунды
+DEFAULT_SCAN_TIMEOUT = 60
 
 # Device types
 DEVICE_TYPE_GAS = "gas"
@@ -61,20 +61,26 @@ IDX_TEMP_END = 20
 
 # MAC address indices
 MAC_PREFIX = "B0:"
-MAC_MODEL_IDX = 1  # Индекс байта модели XX в MAC (после разбиения по ':')
-MAC_TYPE_IDX = 2   # Индекс байта типа YY в MAC
+MAC_MODEL_IDX = 1
+MAC_TYPE_IDX = 2
 
-# --- Таблицы моделей (твои данные) ---
-GAS_MODELS = {1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 32, 33, 34, 35, 36, 48, 49, 50, 51, 52, 64, 65, 66, 67, 68, 80, 81, 82, 83, 84}
-WATER_MODELS = {1, 2, 3, 4, 5, 6}
-# ---
+# Gas models (твои данные)
+GAS_MODELS = {
+    1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 32, 33, 34, 35, 36, 48, 49, 50, 51, 52,
+    64, 65, 66, 67, 68, 80, 81, 82, 83, 84
+}
+
+# Water models (твои данные)
+WATER_MODELS = {
+    1, 2, 3, 4, 5, 6
+}
 
 # Sensor units
 UNIT_TEMPERATURE = UnitOfTemperature.CELSIUS
 UNIT_BATTERY = PERCENTAGE
 
 # Sensor device classes
-DEVICE_CLASS_METER = "water"  # Will be overridden for gas
+DEVICE_CLASS_METER = "water"
 DEVICE_CLASS_TEMPERATURE = "temperature"
 DEVICE_CLASS_BATTERY = "battery"
 

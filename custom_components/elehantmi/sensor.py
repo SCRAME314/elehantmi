@@ -106,13 +106,14 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{serial}_{sensor_type}"
         self._attr_should_poll = False
         
-        # Set device info
+        # Set device info - УБИРАЕМ via_device
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(serial))},
             name=device_name,
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
             sw_version="1.0",
+        
         )
 
     @callback

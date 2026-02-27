@@ -3,19 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+import time
+from typing import Any
 
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.components import bluetooth
-from homeassistant.const import CONF_NAME, CONF_UNIT_OF_MEASUREMENT
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_BT_ADAPTER,
     CONF_DEVICE_NAME,
     CONF_DEVICE_SERIAL,
     CONF_DEVICE_TYPE,
@@ -25,13 +23,14 @@ from .const import (
     CONF_SELECTED_BT_ADAPTER,
     CONF_UNITS,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SCAN_TIMEOUT,
     DEVICE_TYPE_GAS,
     DEVICE_TYPE_WATER,
     DOMAIN,
     UNIT_CUBIC_METERS,
     UNIT_LITERS,
 )
-from .scanner import ElehantScanner, extract_serial_from_mac, get_device_type_from_mac
+from .scanner import ElehantHistoryScanner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,13 +39,11 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Elehant Meter."""
 
     VERSION = 1
-    
+
     def __init__(self):
         """Initialize the config flow."""
-        self.discovered_devices = {}
-        self.selected_devices = []
-        self.scanner = None
-        self.scan_task = None
+        self.discovered_devices = []  # Список словарей с информацией об устройствах для выбора
+        self.scan_task: asyncio.Task | None = None
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
@@ -55,25 +52,22 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             menu_options=["manual_add", "auto_discover"],
         )
 
+    # ---------- РУЧНОЕ ДОБАВЛЕНИЕ ----------
     async def async_step_manual_add(self, user_input=None):
         """Handle manual addition of meter."""
         errors = {}
         
         if user_input is not None:
             serial = user_input[CONF_DEVICE_SERIAL]
-            device_type = user_input[CONF_DEVICE_TYPE]
-            
-            # Check if device already configured
             await self.async_set_unique_id(str(serial))
             self._abort_if_unique_id_configured()
             
-            # Save manual meter configuration
             return self.async_create_entry(
                 title=user_input[CONF_DEVICE_NAME],
                 data={
                     CONF_MANUAL_METERS: [{
                         CONF_DEVICE_SERIAL: serial,
-                        CONF_DEVICE_TYPE: device_type,
+                        CONF_DEVICE_TYPE: user_input[CONF_DEVICE_TYPE],
                         CONF_DEVICE_NAME: user_input[CONF_DEVICE_NAME],
                         CONF_UNITS: user_input[CONF_UNITS],
                         CONF_LOCATION: user_input.get(CONF_LOCATION, ""),
@@ -84,9 +78,8 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             )
         
-        # Get available BT adapters
+        # Форма ручного ввода
         adapters = await self._get_bt_adapters()
-        
         return self.async_show_form(
             step_id="manual_add",
             data_schema=vol.Schema({
@@ -121,85 +114,117 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    # ---------- АВТОМАТИЧЕСКОЕ ОБНАРУЖЕНИЕ ----------
     async def async_step_auto_discover(self, user_input=None):
-        """Handle auto-discovery of meters."""
+        """Start the discovery process or show found devices."""
         errors = {}
         
+        # Если это первый вход в шаг или нужно начать сканирование
+        if user_input is None:
+            # Запускаем фоновое сканирование на N секунд
+            scanner: ElehantHistoryScanner = self.hass.data[DOMAIN]["scanner"]
+            self.scan_task = asyncio.create_task(
+                self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
+            )
+            # Показываем прогресс
+            return self.async_show_progress(
+                step_id="auto_discover_progress",
+                progress_action="scanning",
+            )
+        
+        # Если возвращаемся из прогресса (сканирование завершено)
+        if user_input.get("finished"):
+            if not self.discovered_devices:
+                return self.async_abort(reason="no_devices_found")
+            
+            # Показываем список найденных устройств для выбора
+            return await self.async_step_select_devices()
+        
+        # Обработка ошибок (если есть)
+        return self.async_show_progress_done(next_step_id="select_devices")
+
+    async def async_step_auto_discover_progress(self, user_input=None):
+        """Step to show progress of scanning."""
+        # Этот шаг автоматически вызывается после async_show_progress
+        # Просто передаем управление обратно в auto_discover с флагом finished
+        return await self.async_step_auto_discover({"finished": True})
+
+    async def _scan_and_gather(self, scanner: ElehantHistoryScanner, timeout: int):
+        """Wait for scan to complete and gather devices."""
+        await asyncio.sleep(timeout)
+        
+        # Собираем устройства из истории сканера, виденные за последние 24 часа
+        recent = scanner.get_recent_devices(hours=24)
+        
+        # Фильтруем уже настроенные
+        self.discovered_devices = []
+        for dev in recent:
+            unique_id = str(dev["serial"])
+            if not await self.async_set_unique_id(unique_id, raise_on_progress=False):
+                # Устройство еще не настроено
+                self.discovered_devices.append(dev)
+        
+        # Завершаем шаг прогресса
+        self.hass.async_create_task(
+            self.hass.config_entries.flow.async_configure(
+                flow_id=self.flow_id, user_input={"finished": True}
+            )
+        )
+
+    async def async_step_select_devices(self, user_input=None):
+        """Let user select devices from the list."""
         if user_input is not None:
-            # Stop scanning
-            if self.scan_task:
-                self.scan_task.cancel()
-            if self.scanner:
-                await self.scanner.stop()
+            selected_macs = user_input.get("devices", [])
+            if not selected_macs:
+                return self.async_abort(reason="no_devices_selected")
             
-            self.selected_devices = user_input.get("devices", [])
-            if self.selected_devices:
-                return await self.async_step_configure_devices()
-            else:
-                errors["base"] = "no_devices_selected"
+            # Переходим к конфигурации выбранных устройств
+            self.selected_devices = [
+                dev for dev in self.discovered_devices if dev["mac"] in selected_macs
+            ]
+            return await self.async_step_configure_devices()
         
-        # Start scanning for devices
-        if not self.scanner:
-            self.scanner = ElehantScanner(self.hass)
-            adapter = user_input.get(CONF_SELECTED_BT_ADAPTER, "hci0") if user_input else "hci0"
-            await self.scanner.start(adapter=adapter)
-            
-            # Run scan for 10 seconds
-            self.scan_task = asyncio.create_task(self._scan_for_devices())
-        
-        # Get discovered devices
-        discovered = []
-        for mac, data in self.discovered_devices.items():
-            serial = data["serial"]
-            device_type = data["device_type"]
-            discovered.append({
-                "value": mac,
-                "label": f"{serial} - {'Gas' if device_type == DEVICE_TYPE_GAS else 'Water'} ({mac})",
-            })
-        
-        # Get available BT adapters
-        adapters = await self._get_bt_adapters()
+        # Строим список опций для выбора
+        options = []
+        for dev in self.discovered_devices:
+            last_seen_str = time.strftime(
+                "%H:%M %d.%m", time.localtime(dev["last_seen"])
+            )
+            label = f"{dev['device_type'].upper()}: {dev['serial']} (модель {dev['model']}, RSSI:{dev['best_rssi']}) - last seen: {last_seen_str}"
+            options.append({"value": dev["mac"], "label": label})
         
         return self.async_show_form(
-            step_id="auto_discover",
+            step_id="select_devices",
             data_schema=vol.Schema({
                 vol.Required("devices"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=discovered,
+                        options=options,
                         multiple=True,
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
-                ),
-                vol.Optional(CONF_SELECTED_BT_ADAPTER, default="hci0"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=adapters,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
+                )
             }),
-            errors=errors,
         )
 
     async def async_step_configure_devices(self, user_input=None):
-        """Configure discovered devices."""
+        """Configure each selected device."""
         errors = {}
         
         if user_input is not None:
             meters = []
-            for mac in self.selected_devices:
-                device_info = self.discovered_devices[mac]
-                serial = device_info["serial"]
-                
-                # Check if device already configured
-                await self.async_set_unique_id(str(serial))
-                if self._async_current_entries():
+            for dev in self.selected_devices:
+                serial = dev["serial"]
+                # Еще раз проверяем, не добавили ли параллельно
+                if self._async_current_ids().get(str(serial)):
                     continue
                 
                 meters.append({
                     CONF_DEVICE_SERIAL: serial,
-                    CONF_DEVICE_TYPE: device_info["device_type"],
-                    CONF_DEVICE_NAME: user_input.get(f"name_{serial}", 
-                                                     f"Elehant {'Gas' if device_info['device_type'] == DEVICE_TYPE_GAS else 'Water'} {serial}"),
+                    CONF_DEVICE_TYPE: dev["device_type"],
+                    CONF_DEVICE_NAME: user_input.get(
+                        f"name_{serial}",
+                        f"Elehant {dev['device_type'].capitalize()} {serial}"
+                    ),
                     CONF_UNITS: user_input.get(f"units_{serial}", UNIT_CUBIC_METERS),
                     CONF_LOCATION: user_input.get(f"location_{serial}", ""),
                 })
@@ -207,25 +232,18 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if meters:
                 return self.async_create_entry(
                     title="Elehant Meters",
-                    data={
-                        CONF_MANUAL_METERS: meters,
-                    },
-                    options={
-                        CONF_SELECTED_BT_ADAPTER: user_input.get(CONF_SELECTED_BT_ADAPTER, "hci0"),
-                    }
+                    data={CONF_MANUAL_METERS: meters},
+                    options={},
                 )
             else:
                 errors["base"] = "all_devices_configured"
         
-        # Build schema for device configuration
+        # Строим схему с полями для каждого устройства
         schema = {}
-        for mac in self.selected_devices:
-            device_info = self.discovered_devices[mac]
-            serial = device_info["serial"]
-            device_type = device_info["device_type"]
-            
-            schema[vol.Required(f"name_{serial}", 
-                               default=f"Elehant {'Gas' if device_type == DEVICE_TYPE_GAS else 'Water'} {serial}")] = str
+        for dev in self.selected_devices:
+            serial = dev["serial"]
+            default_name = f"Elehant {dev['device_type'].capitalize()} {serial}"
+            schema[vol.Required(f"name_{serial}", default=default_name)] = str
             schema[vol.Optional(f"location_{serial}", default="")] = str
             schema[vol.Required(f"units_{serial}", default=UNIT_CUBIC_METERS)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -243,25 +261,11 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def _scan_for_devices(self):
-        """Scan for devices for 10 seconds."""
-        try:
-            await asyncio.sleep(10)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            if self.scanner:
-                self.discovered_devices = self.scanner.discovered_devices
-            self.hass.async_create_task(
-                self.hass.config_entries.flow.async_configure(flow_id=self.flow_id)
-            )
-
+    # ---------- ВСПОМОГАТЕЛЬНОЕ ----------
     async def _get_bt_adapters(self):
         """Get list of available Bluetooth adapters."""
         adapters = [{"value": "hci0", "label": "Default (hci0)"}]
-        
         try:
-            # Try to get list of adapters from system
             import subprocess
             result = subprocess.run(["hciconfig"], capture_output=True, text=True)
             if result.returncode == 0:
@@ -273,7 +277,6 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             adapters.append({"value": adapter, "label": adapter})
         except Exception:
             pass
-        
         return adapters
 
     @staticmethod
@@ -289,16 +292,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, config_entry):
         """Initialize options flow."""
         self._config_entry = config_entry
-        super().__init__()
 
     async def async_step_init(self, user_input=None):
         """Manage options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Get available BT adapters
         adapters = await self._get_bt_adapters()
-        
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
@@ -328,7 +328,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def _get_bt_adapters(self):
         """Get list of available Bluetooth adapters."""
         adapters = [{"value": "hci0", "label": "Default (hci0)"}]
-        
         try:
             import subprocess
             result = subprocess.run(["hciconfig"], capture_output=True, text=True)
@@ -341,5 +340,4 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             adapters.append({"value": adapter, "label": adapter})
         except Exception:
             pass
-        
         return adapters

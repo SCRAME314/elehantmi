@@ -63,7 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await scanner.start(adapter=bt_adapter)
         
         # Store scanner reference for cleanup
-        entry.async_on_unload(lambda: asyncio.create_task(scanner.stop()))
+        entry.async_on_unload(scanner.stop())
     
     # Create device trackers for each configured meter
     meters = entry.data.get(CONF_MANUAL_METERS, [])

@@ -1,16 +1,12 @@
-"""Bluetooth scanner with history for Elehant meters."""
+"""Bluetooth scanner with history for Elehant meters using HA Bluetooth API."""
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from datetime import datetime
 from typing import Any, Callable
 
-from bleak import BleakScanner
-from bleak.backends.device import BLEDevice
-from bleak.backends.scanner import AdvertisementData
-
+from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -39,7 +35,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def extract_info_from_mac(mac: str) -> dict | None:
     """Extract model, type and serial from MAC address."""
-    if not mac.startswith(MAC_PREFIX):
+    if not mac or not mac.startswith(MAC_PREFIX):
         return None
     
     parts = mac.split(":")
@@ -62,7 +58,9 @@ def extract_info_from_mac(mac: str) -> dict | None:
         elif model in WATER_MODELS:
             device_type = DEVICE_TYPE_WATER
         else:
-            return None  # Неизвестная модель
+            # Временно принимаем любые B0 для отладки
+            _LOGGER.debug(f"Unknown model {model} for MAC {mac}, but accepting")
+            device_type = DEVICE_TYPE_WATER if type_byte in [0x02, 0x03, 0x04] else DEVICE_TYPE_GAS
         
         return {
             "serial": serial,
@@ -71,7 +69,8 @@ def extract_info_from_mac(mac: str) -> dict | None:
             "device_type": device_type,
             "mac": mac,
         }
-    except (ValueError, IndexError):
+    except (ValueError, IndexError) as e:
+        _LOGGER.debug(f"Error parsing MAC {mac}: {e}")
         return None
 
 def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | None:
@@ -121,82 +120,56 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
 
 
 class ElehantHistoryScanner:
-    """Continuous BLE scanner that keeps history of seen Elehant devices."""
+    """Scanner using HA Bluetooth API that keeps history of seen Elehant devices."""
 
-    def __init__(self, hass: HomeAssistant, adapter: str = "hci0") -> None:
+    def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the history scanner."""
         self.hass = hass
-        self.adapter = adapter
-        self.scanner: BleakScanner | None = None
+        self._cancel_callback: Callable | None = None
         self._scan_task: asyncio.Task | None = None
-        self._stop_event = asyncio.Event()
         
         # История устройств: { mac: { ... } }
         self.seen_devices: dict[str, dict] = {}
-        self._lock = asyncio.Lock()
         
-        _LOGGER.info("Elehant History Scanner initialized")
-
-    async def start(self) -> None:
-        """Start continuous scanning."""
-        if self.scanner is not None:
-            _LOGGER.warning("Scanner already running")
-            return
-        
-        _LOGGER.info(f"Starting Elehant history scanner on adapter {self.adapter}")
-        
-        try:
-            self.scanner = BleakScanner(
-                detection_callback=self._detection_callback,
-                adapter=self.adapter,
-            )
-            self._stop_event.clear()
-            self._scan_task = asyncio.create_task(self._run_scanner())
-            _LOGGER.info("Elehant history scanner started successfully")
-        except Exception as e:
-            _LOGGER.error(f"Failed to start scanner: {e}")
-            self.scanner = None
-            raise
-
-    async def _run_scanner(self) -> None:
-        """Run scanner continuously."""
-        try:
-            await self.scanner.start()
-            await self._stop_event.wait()
-        except asyncio.CancelledError:
-            _LOGGER.debug("Scanner task cancelled")
-        except Exception as e:
-            _LOGGER.error(f"Scanner error: {e}")
-        finally:
-            if self.scanner:
-                await self.scanner.stop()
-                self.scanner = None
+        _LOGGER.info("Elehant History Scanner initialized with HA Bluetooth API")
 
     def _detection_callback(
-        self, device: BLEDevice, advertisement_data: AdvertisementData
+        self, service_info: bluetooth.BluetoothServiceInfoBleak
     ) -> None:
-        """Handle device detection and update history."""
-        # Отладка: видим все BLE устройства
-        _LOGGER.debug(f"BLE: {device.address} RSSI:{advertisement_data.rssi}")
+        """Handle device detection from HA Bluetooth API."""
+        # Выводим всё для отладки
+        _LOGGER.debug(f"HA BLE: {service_info.address} RSSI:{service_info.rssi}")
         
         # Проверяем MAC
-        mac_info = extract_info_from_mac(device.address)
+        if not service_info.address.startswith("B0:"):
+            return
+        
+        # Кричим, если нашли B0:
+        _LOGGER.error(f"!!! НАШЕЛ ПОТЕНЦИАЛЬНЫЙ ЭЛЕХАНТ: {service_info.address}")
+        _LOGGER.error(f"!!! Данные производителя: {service_info.manufacturer_data}")
+        _LOGGER.error(f"!!! RSSI: {service_info.rssi}")
+        
+        # Извлекаем информацию из MAC
+        mac_info = extract_info_from_mac(service_info.address)
         if not mac_info:
-            return  # Не наше устройство или неизвестная модель
+            _LOGGER.warning(f"Не удалось извлечь данные из MAC {service_info.address}")
+            return
         
         # Парсим данные пакета
-        parsed = parse_meter_data(advertisement_data.manufacturer_data)
+        parsed = parse_meter_data(service_info.manufacturer_data)
+        if parsed:
+            _LOGGER.error(f"!!! РАСПАРСИЛОСЬ: {parsed}")
+        else:
+            _LOGGER.warning(f"Не удалось распарсить данные от {service_info.address}")
         
         now = time.time()
-        mac = device.address
+        mac = service_info.address
         
-        # Обновляем историю (в потокобезопасном режиме)
-        self.hass.loop.call_soon_threadsafe(
-            self._update_history, mac, mac_info, parsed, advertisement_data, now
-        )
+        # Обновляем историю
+        self._update_history(mac, mac_info, parsed, service_info, now)
 
-    def _update_history(self, mac: str, mac_info: dict, parsed: dict | None, adv_data: AdvertisementData, timestamp: float):
-        """Update the device history (runs in HA event loop)."""
+    def _update_history(self, mac: str, mac_info: dict, parsed: dict | None, service_info: bluetooth.BluetoothServiceInfoBleak, timestamp: float):
+        """Update the device history."""
         if mac not in self.seen_devices:
             # Новое устройство
             self.seen_devices[mac] = {
@@ -208,7 +181,7 @@ class ElehantHistoryScanner:
                 "first_seen": timestamp,
                 "last_seen": timestamp,
                 "packets": 0,
-                "best_rssi": adv_data.rssi,
+                "best_rssi": service_info.rssi,
                 "manufacturer_data": {},
             }
             _LOGGER.info(f"New Elehant device discovered: {mac} (SN:{mac_info['serial']}, Model:{mac_info['model']}, Type:{mac_info['device_type']})")
@@ -217,8 +190,8 @@ class ElehantHistoryScanner:
         device_info = self.seen_devices[mac]
         device_info["last_seen"] = timestamp
         device_info["packets"] += 1
-        if adv_data.rssi > device_info["best_rssi"]:
-            device_info["best_rssi"] = adv_data.rssi
+        if service_info.rssi > device_info["best_rssi"]:
+            device_info["best_rssi"] = service_info.rssi
         
         # Если есть данные счетчика, сохраняем последние показания
         if parsed:
@@ -227,7 +200,7 @@ class ElehantHistoryScanner:
             device_info["last_raw"] = parsed["raw_data"]
             
             # Если этот счетчик уже настроен, шлем обновление
-            self._notify_meter_update(mac_info["serial"], parsed, adv_data.rssi)
+            self._notify_meter_update(mac_info["serial"], parsed, service_info.rssi)
 
     def _notify_meter_update(self, serial: int, parsed: dict, rssi: int):
         """Notify a configured meter about new data."""
@@ -253,17 +226,28 @@ class ElehantHistoryScanner:
                 recent.append({"mac": mac, **info})
         return recent
 
+    async def start(self):
+        """Start listening for Bluetooth devices via HA API."""
+        _LOGGER.info("Starting Elehant history scanner via HA Bluetooth API")
+        
+        from homeassistant.components.bluetooth import (
+            async_register_callback,
+            BluetoothScanningMode,
+        )
+        
+        self._cancel_callback = async_register_callback(
+            self.hass,
+            self._detection_callback,
+            {},
+            BluetoothScanningMode.ACTIVE,  # ← АКТИВНЫЙ РЕЖИМ!
+        )
+        
+        _LOGGER.info("Elehant history scanner started successfully")
+
     async def stop(self):
-        """Stop scanning."""
+        """Stop listening for Bluetooth devices."""
         _LOGGER.info("Stopping Elehant history scanner")
-        self._stop_event.set()
-        if self._scan_task and not self._scan_task.done():
-            self._scan_task.cancel()
-            try:
-                await self._scan_task
-            except asyncio.CancelledError:
-                pass
-        if self.scanner:
-            await self.scanner.stop()
-            self.scanner = None
+        if self._cancel_callback:
+            self._cancel_callback()
+            self._cancel_callback = None
         _LOGGER.info("Elehant history scanner stopped")

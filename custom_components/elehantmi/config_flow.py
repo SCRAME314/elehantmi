@@ -118,9 +118,19 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Start the discovery process."""
         if user_input is None:
             scanner = self.hass.data[DOMAIN]["scanner"]
-            self.scan_task = asyncio.create_task(
-                self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
-            )
+            
+            # Создаем задачу с обработкой отмены
+            async def _scan_with_cleanup():
+                try:
+                    await self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
+                except asyncio.CancelledError:
+                    _LOGGER.debug("Scan task cancelled by user")
+                    # Не пробрасываем дальше, чтобы не ломать flow
+                except Exception as err:
+                    _LOGGER.error("Scan task error: %s", err)
+            
+            self.scan_task = asyncio.create_task(_scan_with_cleanup())
+            
             return self.async_show_progress(
                 step_id="auto_discover_progress",
                 progress_action="scanning",
@@ -131,6 +141,10 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_auto_discover_progress(self, user_input=None):
         """Step to show progress of scanning."""
+        # Проверяем, не была ли задача отменена
+        if self.scan_task and self.scan_task.cancelled():
+            return self.async_abort(reason="scan_cancelled")
+        
         return await self.async_step_auto_discover_done()
 
     async def async_step_auto_discover_done(self, user_input=None):
@@ -141,18 +155,22 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _scan_and_gather(self, scanner, timeout: int):
         """Wait for scan to complete and gather devices."""
-        await asyncio.sleep(timeout)
-    
-        recent = scanner.get_recent_devices(hours=24)
-    
-        self.discovered_devices = []
-        for dev in recent:
-            unique_id = str(dev["serial"])
-       
-            if unique_id in self._async_current_ids():
-                continue
-            self.discovered_devices.append(dev)
+        try:
+            await asyncio.sleep(timeout)
             
+            recent = scanner.get_recent_devices(hours=24)
+            
+            self.discovered_devices = []
+            for dev in recent:
+                unique_id = str(dev["serial"])
+                if unique_id in self._async_current_ids():
+                    continue
+                self.discovered_devices.append(dev)
+                
+        except asyncio.CancelledError:
+            _LOGGER.debug("Scan cancelled")
+            raise  # Пробрасываем для обработки в _scan_with_cleanup
+
     async def async_step_select_devices(self, user_input=None):
         """Let user select devices from the list."""
         if user_input is not None:

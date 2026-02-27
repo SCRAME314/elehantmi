@@ -60,7 +60,7 @@ IDX_TEMP_START = 18
 IDX_TEMP_END = 20
 
 # MAC address indices
-MAC_PREFIX = "B0:"
+MAC_PREFIXES = {"B0:", "B1:"}
 MAC_MODEL_IDX = 1
 MAC_TYPE_IDX = 2
 

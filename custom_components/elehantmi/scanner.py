@@ -24,7 +24,7 @@ from .const import (
     IDX_VALUE_END,
     IDX_VALUE_START,
     MAC_MODEL_IDX,
-    MAC_PREFIX,
+    MAC_PREFIXES,
     MAC_TYPE_IDX,
     SEPARATOR,
     SIGNAL_NEW_DATA,
@@ -35,7 +35,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def extract_info_from_mac(mac: str) -> dict | None:
     """Extract model, type and serial from MAC address."""
-    if not mac or not mac.startswith(MAC_PREFIX):
+    if not mac or not any(mac.startswith(p) for p in MAC_PREFIXES):
         return None
     
     parts = mac.split(":")
@@ -43,8 +43,9 @@ def extract_info_from_mac(mac: str) -> dict | None:
         return None
     
     try:
-        model_hex = parts[MAC_MODEL_IDX]
-        type_hex = parts[MAC_TYPE_IDX]
+        # Префикс может быть B0 или B1 - берем байт модели из 2-го октета
+        model_hex = parts[MAC_MODEL_IDX]  # Это всегда второй октет
+        type_hex = parts[MAC_TYPE_IDX]    # Это третий октет
         serial_hex = parts[3] + parts[4] + parts[5]
         
         model = int(model_hex, 16)
@@ -178,7 +179,7 @@ class ElehantHistoryScanner:
         _LOGGER.debug(f"HA BLE: {service_info.address} RSSI:{service_info.rssi}")
         
         # Проверяем MAC
-        if not service_info.address.startswith("B0:"):
+        if not any(service_info.address.startswith(p) for p in MAC_PREFIXES):
             return
         
         # Кричим, если нашли B0:

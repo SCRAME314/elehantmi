@@ -45,6 +45,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if "scanner" not in hass.data[DOMAIN]:
         scanner = ElehantScanner(hass)
         hass.data[DOMAIN]["scanner"] = scanner
+
+        # СОЗДАЕМ УСТРОЙСТВО ДЛЯ СКАНЕРА
+        device_registry = dr.async_get(hass)
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "scanner")},
+            name="Elehant BLE Scanner",
+            manufacturer="Elehant",
+            model="Bluetooth Scanner",
+            sw_version="1.0",
+        )
+    
         
         # Start scanning with configured adapter
         bt_adapter = entry.options.get(CONF_SELECTED_BT_ADAPTER, "hci0")

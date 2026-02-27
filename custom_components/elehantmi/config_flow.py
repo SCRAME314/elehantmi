@@ -194,7 +194,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             meters = []
             for dev in self.selected_devices:
                 serial = dev["serial"]
-                if self._async_current_ids().get(str(serial)):
+                if str(serial) in self._async_current_ids():
                     continue
                 
                 meters.append({

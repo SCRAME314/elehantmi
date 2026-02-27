@@ -113,7 +113,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-   async def async_step_auto_discover(self, user_input=None):
+async def async_step_auto_discover(self, user_input=None):
     if user_input is None:
         # запускаем сканирование
         self.scan_task = asyncio.create_task(

@@ -57,9 +57,10 @@ async def async_setup_entry(
     entities = []
     
     # Get all configured meters
-    for meter_serial, meter_config in hass.data[DOMAIN].items():
+    for meter_serial in list(hass.data[DOMAIN].keys()):
         if not meter_serial.startswith("meter_"):
             continue
+        meter_config = hass.data[DOMAIN][meter_serial]
         
         serial = meter_config[CONF_DEVICE_SERIAL]
         device_type = meter_config[CONF_DEVICE_TYPE]

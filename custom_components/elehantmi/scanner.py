@@ -182,9 +182,9 @@ class ElehantHistoryScanner:
             return
         
         # Кричим, если нашли B0:
-        _LOGGER.error(f"!!! НАШЕЛ ПОТЕНЦИАЛЬНЫЙ ЭЛЕХАНТ: {service_info.address}")
-        _LOGGER.error(f"!!! Данные производителя: {service_info.manufacturer_data}")
-        _LOGGER.error(f"!!! RSSI: {service_info.rssi}")
+        _LOGGER.debug(f"!!! НАШЕЛ ПОТЕНЦИАЛЬНЫЙ ЭЛЕХАНТ: {service_info.address}")
+        _LOGGER.debug(f"!!! Данные производителя: {service_info.manufacturer_data}")
+        _LOGGER.debug(f"!!! RSSI: {service_info.rssi}")
         
         # Извлекаем информацию из MAC
         mac_info = extract_info_from_mac(service_info.address)
@@ -195,7 +195,7 @@ class ElehantHistoryScanner:
         # Парсим данные пакета
         parsed = parse_meter_data(service_info.manufacturer_data)
         if parsed:
-            _LOGGER.error(f"!!! РАСПАРСИЛОСЬ: {parsed}")
+           _LOGGER.info(f"Получены данные от счетчика {parsed['serial']}: значение={parsed['value']}, температура={parsed['temperature']}°C")
         else:
             _LOGGER.warning(f"Не удалось распарсить данные от {service_info.address}")
         

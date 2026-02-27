@@ -1,0 +1,9 @@
+{
+  "name": "Elehant Meter Integration",
+  "render_readme": true,
+  "domains": ["sensor"],
+  "iot_class": "Local Push",
+  "country": ["RU", "BY", "KZ"],
+  "homeassistant": "2023.8.0",
+  "content_in_root": false
+}

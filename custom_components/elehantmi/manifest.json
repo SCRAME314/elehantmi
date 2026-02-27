@@ -1,0 +1,20 @@
+{
+  "domain": "elehantmi",
+  "name": "Elehant Meter Integration",
+  "version": "1.0.0",
+  "requirements": ["bleak>=0.19.0"],
+  "dependencies": ["bluetooth"],
+  "codeowners": ["@SCRAME314"],
+  "config_flow": true,
+  "iot_class": "local_push",
+  "bluetooth": [
+    {
+      "local_name": "elehant*",
+      "connectable": false
+    }
+  ],
+  "documentation": "https://github.com/SCRAME314/elehantmi",
+  "issue_tracker": "https://github.com/SCRAME314/elehantmi/issues"
+  "translations": ["translations/en.json", "translations/ru.json"],
+  "homeassistant": "2023.8.0"
+}

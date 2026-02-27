@@ -1,0 +1,75 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Elehant Meter",
+        "description": "Choose how you want to add your Elehant meter",
+        "menu_options": {
+          "manual_add": "Add manually",
+          "auto_discover": "Auto-discover"
+        }
+      },
+      "manual_add": {
+        "title": "Add Elehant Meter Manually",
+        "description": "Enter the details of your Elehant meter",
+        "data": {
+          "serial": "Serial Number",
+          "device_type": "Meter Type",
+          "name": "Device Name",
+          "units": "Units",
+          "location": "Location",
+          "selected_bt_adapter": "Bluetooth Adapter"
+        }
+      },
+      "auto_discover": {
+        "title": "Discover Elehant Meters",
+        "description": "Scanning for Elehant meters... Select devices to add",
+        "data": {
+          "devices": "Discovered Devices",
+          "selected_bt_adapter": "Bluetooth Adapter"
+        }
+      },
+      "configure_devices": {
+        "title": "Configure Discovered Meters",
+        "description": "Configure the settings for each discovered meter",
+        "data": {
+          "name_{serial}": "Device Name",
+          "location_{serial}": "Location",
+          "units_{serial}": "Units"
+        }
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "Elehant Meter Options",
+          "description": "Configure integration options",
+          "data": {
+            "selected_bt_adapter": "Bluetooth Adapter",
+            "scan_interval": "Scan Interval (seconds)"
+          }
+        }
+      }
+    },
+    "error": {
+      "no_devices_selected": "Please select at least one device",
+      "all_devices_configured": "All selected devices are already configured"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "reading": {
+        "name": "Reading"
+      },
+      "temperature": {
+        "name": "Temperature"
+      },
+      "battery": {
+        "name": "Battery"
+      }
+    }
+  }
+}

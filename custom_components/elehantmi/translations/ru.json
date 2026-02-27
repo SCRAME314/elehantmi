@@ -1,0 +1,75 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Добавить счетчик Элехант",
+        "description": "Выберите способ добавления счетчика Элехант",
+        "menu_options": {
+          "manual_add": "Добавить вручную",
+          "auto_discover": "Автоматический поиск"
+        }
+      },
+      "manual_add": {
+        "title": "Добавить счетчик Элехант вручную",
+        "description": "Введите данные вашего счетчика Элехант",
+        "data": {
+          "serial": "Серийный номер",
+          "device_type": "Тип счетчика",
+          "name": "Название устройства",
+          "units": "Единицы измерения",
+          "location": "Местоположение",
+          "selected_bt_adapter": "Bluetooth адаптер"
+        }
+      },
+      "auto_discover": {
+        "title": "Поиск счетчиков Элехант",
+        "description": "Поиск устройств... Выберите устройства для добавления",
+        "data": {
+          "devices": "Найденные устройства",
+          "selected_bt_adapter": "Bluetooth адаптер"
+        }
+      },
+      "configure_devices": {
+        "title": "Настройка найденных счетчиков",
+        "description": "Настройте параметры для каждого найденного счетчика",
+        "data": {
+          "name_{serial}": "Название устройства",
+          "location_{serial}": "Местоположение",
+          "units_{serial}": "Единицы измерения"
+        }
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "Настройки интеграции Элехант",
+          "description": "Настройка параметров интеграции",
+          "data": {
+            "selected_bt_adapter": "Bluetooth адаптер",
+            "scan_interval": "Интервал сканирования (секунды)"
+          }
+        }
+      }
+    },
+    "error": {
+      "no_devices_selected": "Выберите хотя бы одно устройство",
+      "all_devices_configured": "Все выбранные устройства уже настроены"
+    },
+    "abort": {
+      "already_configured": "Устройство уже настроено"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "reading": {
+        "name": "Показания"
+      },
+      "temperature": {
+        "name": "Температура"
+      },
+      "battery": {
+        "name": "Батарея"
+      }
+    }
+  }
+}

@@ -10,24 +10,18 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_SERIAL,
     CONF_DEVICE_TYPE,
     CONF_MANUAL_METERS,
-    CONF_SCAN_INTERVAL,
     CONF_SELECTED_BT_ADAPTER,
-    DEFAULT_SCAN_INTERVAL,
     DEVICE_TYPE_GAS,
-    DEVICE_TYPE_WATER,
     DOMAIN,
     SIGNAL_NEW_DATA,
-    STORAGE_KEY,
-    STORAGE_VERSION,
 )
-from .scanner import ElehantScanner, get_device_type_from_mac
+from .scanner import ElehantHistoryScanner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,47 +32,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elehant Meter from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # Create storage for device configurations
-    store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-    
-    # Initialize scanner if not already running
+    # --- 1. ГЛОБАЛЬНЫЙ СКАНЕР (создается один раз на всю интеграцию) ---
     if "scanner" not in hass.data[DOMAIN]:
-        scanner = ElehantScanner(hass)
-        hass.data[DOMAIN]["scanner"] = scanner
-
-        # СОЗДАЕМ УСТРОЙСТВО ДЛЯ СКАНЕРА
-        device_registry = dr.async_get(hass)
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, "scanner")},
-            name="Elehant BLE Scanner",
-            manufacturer="Elehant",
-            model="Bluetooth Scanner",
-            sw_version="1.0",
-        )
-    
-        
-        # Start scanning with configured adapter
         bt_adapter = entry.options.get(CONF_SELECTED_BT_ADAPTER, "hci0")
-        await scanner.start(adapter=bt_adapter)
-        
-        # Store scanner reference for cleanup
-        entry.async_on_unload(scanner.stop())
+        scanner = ElehantHistoryScanner(hass, adapter=bt_adapter)
+        hass.data[DOMAIN]["scanner"] = scanner
+        await scanner.start()
+        # Остановка сканера при выгрузке последней конфигурации
+        entry.async_on_unload(lambda: asyncio.create_task(scanner.stop()))
+        _LOGGER.info("Global Elehant history scanner created and started")
     
-    # Create device trackers for each configured meter
+    # --- 2. РЕГИСТРАЦИЯ УСТРОЙСТВ (счетчиков) из конфига ---
     meters = entry.data.get(CONF_MANUAL_METERS, [])
     if isinstance(meters, dict):
         meters = [meters]
     
-    # Register devices in device registry
     device_registry = dr.async_get(hass)
-    
     for meter_config in meters:
         serial = meter_config[CONF_DEVICE_SERIAL]
         device_type = meter_config[CONF_DEVICE_TYPE]
         device_name = meter_config[CONF_DEVICE_NAME]
         
-        # Create device in registry
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, str(serial))},
@@ -86,20 +60,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
             sw_version="1.0",
+            # via_device убрали, так как сканер - не устройство
         )
-        
-        # Store meter config for sensors
         hass.data[DOMAIN][f"meter_{serial}"] = meter_config
+        _LOGGER.debug(f"Registered meter {serial} with name {device_name}")
     
-    # Forward setup to sensor platform
+    # --- 3. ЗАПУСК ПЛАТФОРМЫ СЕНСОРОВ ---
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
-    # Subscribe to scanner updates
-    entry.async_on_unload(
-        hass.data[DOMAIN]["scanner"].async_add_listener(
-            lambda data: async_dispatcher_send(hass, SIGNAL_NEW_DATA, data)
-        )
-    )
     
     return True
 
@@ -109,17 +76,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
     if unload_ok:
-        # Stop scanner if this is the last entry
-        if len(hass.config_entries.async_entries(DOMAIN)) == 1:
-            scanner = hass.data[DOMAIN].get("scanner")
-            if scanner:
-                await scanner.stop()
-            hass.data[DOMAIN].pop("scanner", None)
-        
-        # Remove device configurations
+        # Удаляем данные конкретного счетчика
         for key in list(hass.data[DOMAIN].keys()):
-            if key.startswith("meter_"):
+            if key.startswith("meter_") or key.startswith("coordinator_"):
                 hass.data[DOMAIN].pop(key, None)
+        
+        # Сканер НЕ останавливаем, если есть другие активные entry
+        # Он остановится, когда удалится последняя entry (через callback в async_setup_entry)
     
     return unload_ok
 
@@ -127,9 +90,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry."""
     _LOGGER.debug("Migrating from version %s", config_entry.version)
-    
     if config_entry.version == 1:
-        # Migration logic for future versions
         config_entry.version = 2
-    
     return True

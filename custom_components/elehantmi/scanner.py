@@ -85,27 +85,52 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
             data = mfr_data
             break
     
-    if not data or len(data) < 21:
+    if not data:
         return None
     
-    if len(data) > IDX_MARKER and data[IDX_MARKER] != ELEHANT_MARKER:
+    # Минимальная длина: если есть заголовок 14FFFFFF - 21 байт, если нет - 17 байт
+    if len(data) not in (17, 21):
+        _LOGGER.debug(f"Неверная длина данных: {len(data)} байт")
         return None
     
-    if len(data) > IDX_SEPARATOR and data[IDX_SEPARATOR] != SEPARATOR:
+    # Определяем смещение: есть ли заголовок?
+    offset = 0
+    if len(data) == 21 and data[0] == 0x14 and data[1] == 0xFF and data[2] == 0xFF and data[3] == 0xFF:
+        offset = 4
+        _LOGGER.debug("Найден заголовок 14FFFFFF, смещение 4")
+    elif len(data) == 17:
+        offset = 0
+        _LOGGER.debug("Пакет без заголовка, смещение 0")
+    else:
+        _LOGGER.debug(f"Неизвестный формат пакета: {data.hex()}")
+        return None
+    
+    # Проверяем маркер Elehant (0x80)
+    if data[offset] != ELEHANT_MARKER:
+        _LOGGER.debug(f"Неверный маркер: 0x{data[offset]:02X}")
+        return None
+    
+    # Проверяем разделитель 0x7F (он должен быть на позиции offset+13)
+    if data[offset + 13] != SEPARATOR:
+        _LOGGER.debug(f"Неверный разделитель: 0x{data[offset + 13]:02X}")
         return None
     
     try:
-        serial_bytes = data[IDX_SERIAL_START:IDX_SERIAL_END]
+        # Серийный номер (3 байта, little-endian) - на позиции offset+6
+        serial_bytes = data[offset + 6:offset + 9]
         serial = int.from_bytes(serial_bytes, byteorder="little")
         
-        value_bytes = data[IDX_VALUE_START:IDX_VALUE_END]
+        # Значение счетчика (4 байта, little-endian) - на позиции offset+9
+        value_bytes = data[offset + 9:offset + 13]
         value = int.from_bytes(value_bytes, byteorder="little")
         
-        temp_bytes = data[IDX_TEMP_START:IDX_TEMP_END]
+        # Температура (2 байта, little-endian) - на позиции offset+14
+        temp_bytes = data[offset + 14:offset + 16]
         temp_raw = int.from_bytes(temp_bytes, byteorder="little")
         temperature = temp_raw / 100.0
         
-        sequence = data[5] if len(data) > 5 else 0
+        # Последовательность (1 байт) - на позиции offset+1
+        sequence = data[offset + 1]
         
         return {
             "serial": serial,
@@ -115,7 +140,7 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
             "raw_data": data.hex(),
         }
     except Exception as e:
-        _LOGGER.debug(f"Error parsing meter data: {e}")
+        _LOGGER.debug(f"Ошибка парсинга: {e}")
         return None
 
 

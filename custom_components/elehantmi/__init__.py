@@ -9,17 +9,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_SERIAL,
     CONF_DEVICE_TYPE,
     CONF_MANUAL_METERS,
-    CONF_SELECTED_BT_ADAPTER,
     DEVICE_TYPE_GAS,
     DOMAIN,
-    SIGNAL_NEW_DATA,
 )
 from .scanner import ElehantHistoryScanner
 
@@ -32,17 +29,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elehant Meter from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # --- 1. ГЛОБАЛЬНЫЙ СКАНЕР (создается один раз на всю интеграцию) ---
+    # Создаем глобальный сканер при первом запуске
     if "scanner" not in hass.data[DOMAIN]:
-        bt_adapter = entry.options.get(CONF_SELECTED_BT_ADAPTER, "hci0")
-        scanner = ElehantHistoryScanner(hass, adapter=bt_adapter)
+        scanner = ElehantHistoryScanner(hass)
         hass.data[DOMAIN]["scanner"] = scanner
         await scanner.start()
-        # Остановка сканера при выгрузке последней конфигурации
-        entry.async_on_unload(scanner.stop())
-        _LOGGER.info("Global Elehant history scanner created and started")
+        entry.async_on_unload(scanner.stop)
+        _LOGGER.info("Global Elehant history scanner created")
     
-    # --- 2. РЕГИСТРАЦИЯ УСТРОЙСТВ (счетчиков) из конфига ---
+    # Регистрируем устройства из конфига
     meters = entry.data.get(CONF_MANUAL_METERS, [])
     if isinstance(meters, dict):
         meters = [meters]
@@ -60,12 +55,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
             sw_version="1.0",
-            # via_device убрали, так как сканер - не устройство
         )
         hass.data[DOMAIN][f"meter_{serial}"] = meter_config
-        _LOGGER.debug(f"Registered meter {serial} with name {device_name}")
+        _LOGGER.debug(f"Registered meter {serial}")
     
-    # --- 3. ЗАПУСК ПЛАТФОРМЫ СЕНСОРОВ ---
+    # Запускаем сенсоры
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
     return True

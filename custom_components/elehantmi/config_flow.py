@@ -113,23 +113,20 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    # ---------- АВТОМАТИЧЕСКОЕ ОБНАРУЖЕНИЕ ----------
-    async def async_step_auto_discover(self, user_input=None):
-        """Start the discovery process or show found devices."""
-        if user_input is None:
-            scanner = self.hass.data[DOMAIN]["scanner"]
-            # Создаем задачу и передаем ее в show_progress
-            self.scan_task = asyncio.create_task(
-                self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
-            )
-            return self.async_show_progress(
-                step_id="auto_discover_progress",
-                progress_action="scanning",
-                progress_task=self.scan_task,  # ← ВАЖНО: передаем задачу
-            )
-        
-        # Когда сканирование завершено, переходим на промежуточный шаг
-        return await self.async_step_auto_discover_done()
+   async def async_step_auto_discover(self, user_input=None):
+    if user_input is None:
+        # запускаем сканирование
+        self.scan_task = asyncio.create_task(
+            self._scan_and_gather(self.hass.data[DOMAIN]["scanner"], DEFAULT_SCAN_TIMEOUT)
+        )
+        return self.async_show_progress(
+            step_id="auto_discover_progress",
+            progress_action="scanning",
+            progress_task=self.scan_task,
+        )
+    
+    # Когда сканирование завершено, переходим на промежуточный шаг
+    return await self.async_step_auto_discover_done()
 
     async def async_step_auto_discover_progress(self, user_input=None):
         """Step to show progress of scanning."""

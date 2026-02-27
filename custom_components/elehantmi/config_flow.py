@@ -142,16 +142,17 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def _scan_and_gather(self, scanner, timeout: int):
         """Wait for scan to complete and gather devices."""
         await asyncio.sleep(timeout)
-        
+    
         recent = scanner.get_recent_devices(hours=24)
-        
+    
         self.discovered_devices = []
         for dev in recent:
             unique_id = str(dev["serial"])
-            if self._async_current_ids().get(unique_id):
+       
+            if unique_id in self._async_current_ids():
                 continue
             self.discovered_devices.append(dev)
-
+            
     async def async_step_select_devices(self, user_input=None):
         """Let user select devices from the list."""
         if user_input is not None:
@@ -193,7 +194,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             meters = []
             for dev in self.selected_devices:
                 serial = dev["serial"]
-                if self._async_current_ids().get(str(serial)):
+                if str(serial) in self._async_current_ids():
                     continue
                 
                 meters.append({

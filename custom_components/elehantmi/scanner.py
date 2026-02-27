@@ -24,7 +24,7 @@ from .const import (
     IDX_VALUE_END,
     IDX_VALUE_START,
     MAC_MODEL_IDX,
-    MAC_PREFIX,
+    MAC_PREFIXES,
     MAC_TYPE_IDX,
     SEPARATOR,
     SIGNAL_NEW_DATA,
@@ -179,7 +179,7 @@ class ElehantHistoryScanner:
         _LOGGER.debug(f"HA BLE: {service_info.address} RSSI:{service_info.rssi}")
         
         # Проверяем MAC
-        if not service_info.address.startswith("B0:"):
+        if not any(service_info.address.startswith(p) for p in MAC_PREFIXES):
             return
         
         # Кричим, если нашли B0:

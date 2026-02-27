@@ -139,6 +139,16 @@ class ElehantHistoryScanner:
         change: bluetooth.BluetoothChange
     ) -> None:
         """Handle device detection from HA Bluetooth API."""
+    
+        # 🚫 БЛОКИРУЕМ ИЗВЕСТНОГО СПАМЕРА
+        blocked_macs = {
+        "1A:EC:A8:F2:57:22",  # Этот сука
+        # "можно добавить еще mac через запятую"
+        }
+
+        if service_info.address in blocked_macs:
+            return  # Игнорируем нахуй
+        
         # Выводим всё для отладки
         _LOGGER.debug(f"HA BLE: {service_info.address} RSSI:{service_info.rssi}")
         

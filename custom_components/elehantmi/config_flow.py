@@ -30,7 +30,6 @@ from .const import (
     UNIT_CUBIC_METERS,
     UNIT_LITERS,
 )
-from .scanner import ElehantHistoryScanner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self):
         """Initialize the config flow."""
-        self.discovered_devices = []  # Список словарей с информацией об устройствах для выбора
+        self.discovered_devices = []
         self.scan_task: asyncio.Task | None = None
 
     async def async_step_user(self, user_input=None):
@@ -117,39 +116,34 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ---------- АВТОМАТИЧЕСКОЕ ОБНАРУЖЕНИЕ ----------
     async def async_step_auto_discover(self, user_input=None):
         """Start the discovery process or show found devices."""
-        errors = {}
-        
-        # Если это первый вход в шаг или нужно начать сканирование
         if user_input is None:
-            # Запускаем фоновое сканирование на N секунд
-            scanner: ElehantHistoryScanner = self.hass.data[DOMAIN]["scanner"]
+            scanner = self.hass.data[DOMAIN]["scanner"]
+            # Создаем задачу и передаем ее в show_progress
             self.scan_task = asyncio.create_task(
                 self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
             )
-            # Показываем прогресс
             return self.async_show_progress(
                 step_id="auto_discover_progress",
                 progress_action="scanning",
+                progress_task=self.scan_task,  # ← ВАЖНО: передаем задачу
             )
         
-        # Если возвращаемся из прогресса (сканирование завершено)
-        if user_input.get("finished"):
-            if not self.discovered_devices:
-                return self.async_abort(reason="no_devices_found")
-            
-            # Показываем список найденных устройств для выбора
-            return await self.async_step_select_devices()
-        
-        # Обработка ошибок (если есть)
-        return self.async_show_progress_done(next_step_id="select_devices")
+        # Когда сканирование завершено, переходим на промежуточный шаг
+        return await self.async_step_auto_discover_done()
 
     async def async_step_auto_discover_progress(self, user_input=None):
         """Step to show progress of scanning."""
-        # Этот шаг автоматически вызывается после async_show_progress
-        # Просто передаем управление обратно в auto_discover с флагом finished
-        return await self.async_step_auto_discover({"finished": True})
+        # Этот шаг автоматически управляется HA
+        # Просто передаем управление дальше
+        return await self.async_step_auto_discover_done()
 
-    async def _scan_and_gather(self, scanner: ElehantHistoryScanner, timeout: int):
+    async def async_step_auto_discover_done(self, user_input=None):
+        """Handle completion of auto discovery."""
+        if not self.discovered_devices:
+            return self.async_abort(reason="no_devices_found")
+        return await self.async_step_select_devices()
+
+    async def _scan_and_gather(self, scanner, timeout: int):
         """Wait for scan to complete and gather devices."""
         await asyncio.sleep(timeout)
         
@@ -160,16 +154,13 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.discovered_devices = []
         for dev in recent:
             unique_id = str(dev["serial"])
-            if not await self.async_set_unique_id(unique_id, raise_on_progress=False):
-                # Устройство еще не настроено
-                self.discovered_devices.append(dev)
+            # Проверяем, не настроено ли уже
+            if self._async_current_ids().get(unique_id):
+                continue
+            self.discovered_devices.append(dev)
         
-        # Завершаем шаг прогресса
-        self.hass.async_create_task(
-            self.hass.config_entries.flow.async_configure(
-                flow_id=self.flow_id, user_input={"finished": True}
-            )
-        )
+        # Завершаем шаг прогресса (HA сам вызовет следующий шаг)
+        # Ничего не делаем, просто возвращаемся
 
     async def async_step_select_devices(self, user_input=None):
         """Let user select devices from the list."""

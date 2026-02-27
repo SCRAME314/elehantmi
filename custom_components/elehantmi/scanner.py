@@ -1,9 +1,10 @@
-"""Bluetooth scanner for Elehant meters."""
+"""Bluetooth scanner with history for Elehant meters."""
 from __future__ import annotations
 
 import asyncio
 import logging
-import struct
+import time
+from datetime import datetime
 from typing import Any, Callable
 
 from bleak import BleakScanner
@@ -18,6 +19,7 @@ from .const import (
     DEVICE_TYPE_WATER,
     DOMAIN,
     ELEHANT_MARKER,
+    GAS_MODELS,
     IDX_MARKER,
     IDX_SERIAL_END,
     IDX_SERIAL_START,
@@ -25,18 +27,18 @@ from .const import (
     IDX_TEMP_START,
     IDX_VALUE_END,
     IDX_VALUE_START,
+    MAC_MODEL_IDX,
     MAC_PREFIX,
     MAC_TYPE_IDX,
-    PACKET_HEADER,
     SEPARATOR,
     SIGNAL_NEW_DATA,
+    WATER_MODELS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def extract_serial_from_mac(mac: str) -> int | None:
-    """Extract serial number from MAC address."""
+def extract_info_from_mac(mac: str) -> dict | None:
+    """Extract model, type and serial from MAC address."""
     if not mac.startswith(MAC_PREFIX):
         return None
     
@@ -45,33 +47,32 @@ def extract_serial_from_mac(mac: str) -> int | None:
         return None
     
     try:
-        # Serial is in last 3 octets (SS:SS:SS)
+        model_hex = parts[MAC_MODEL_IDX]
+        type_hex = parts[MAC_TYPE_IDX]
         serial_hex = parts[3] + parts[4] + parts[5]
-        return int(serial_hex, 16)
-    except (ValueError, IndexError):
-        return None
-
-
-def get_device_type_from_mac(mac: str) -> str | None:
-    """Get device type from MAC address."""
-    if not mac.startswith(MAC_PREFIX):
-        return None
-    
-    parts = mac.split(":")
-    if len(parts) != 6:
-        return None
-    
-    try:
-        type_byte = int(parts[MAC_TYPE_IDX], 16)
-        if type_byte == 0x01:
-            return DEVICE_TYPE_GAS
-        elif type_byte in [0x02, 0x03, 0x04]:
-            return DEVICE_TYPE_WATER
+        
+        model = int(model_hex, 16)
+        type_byte = int(type_hex, 16)
+        serial = int(serial_hex, 16)
+        
+        # Определяем тип устройства по модели
+        device_type = None
+        if model in GAS_MODELS:
+            device_type = DEVICE_TYPE_GAS
+        elif model in WATER_MODELS:
+            device_type = DEVICE_TYPE_WATER
         else:
-            return None
+            return None  # Неизвестная модель
+        
+        return {
+            "serial": serial,
+            "model": model,
+            "type_byte": type_byte,
+            "device_type": device_type,
+            "mac": mac,
+        }
     except (ValueError, IndexError):
         return None
-
 
 def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | None:
     """Parse manufacturer data from Elehant meter."""
@@ -85,34 +86,26 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
             data = mfr_data
             break
     
-    if not data or len(data) < 21:  # Need at least 21 bytes
+    if not data or len(data) < 21:
         return None
     
-    # Check for Elehant marker at byte 4
     if len(data) > IDX_MARKER and data[IDX_MARKER] != ELEHANT_MARKER:
-        _LOGGER.debug(f"Not an Elehant device: marker=0x{data[IDX_MARKER]:02X}")
         return None
     
-    # Check separator at byte 17
     if len(data) > IDX_SEPARATOR and data[IDX_SEPARATOR] != SEPARATOR:
-        _LOGGER.debug(f"Invalid separator: 0x{data[IDX_SEPARATOR]:02X}")
         return None
     
     try:
-        # Extract serial number (3 bytes, little-endian)
         serial_bytes = data[IDX_SERIAL_START:IDX_SERIAL_END]
         serial = int.from_bytes(serial_bytes, byteorder="little")
         
-        # Extract meter value (4 bytes, little-endian)
         value_bytes = data[IDX_VALUE_START:IDX_VALUE_END]
         value = int.from_bytes(value_bytes, byteorder="little")
         
-        # Extract temperature (2 bytes, little-endian)
         temp_bytes = data[IDX_TEMP_START:IDX_TEMP_END]
         temp_raw = int.from_bytes(temp_bytes, byteorder="little")
         temperature = temp_raw / 100.0
         
-        # Get sequence number (optional)
         sequence = data[5] if len(data) > 5 else 0
         
         return {
@@ -127,71 +120,49 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
         return None
 
 
-class ElehantScanner:
-    """Continuous BLE scanner for Elehant meters."""
+class ElehantHistoryScanner:
+    """Continuous BLE scanner that keeps history of seen Elehant devices."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
-        """Initialize scanner."""
+    def __init__(self, hass: HomeAssistant, adapter: str = "hci0") -> None:
+        """Initialize the history scanner."""
         self.hass = hass
+        self.adapter = adapter
         self.scanner: BleakScanner | None = None
-        self._callbacks: list[Callable] = []
         self._scan_task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
-        self.discovered_devices: dict[str, dict] = {}
-        self.configured_meters: dict[int, dict] = {}
+        
+        # История устройств: { mac: { ... } }
+        self.seen_devices: dict[str, dict] = {}
         self._lock = asyncio.Lock()
+        
+        _LOGGER.info("Elehant History Scanner initialized")
 
-    async def start(self, adapter: str = "hci0") -> None:
+    async def start(self) -> None:
         """Start continuous scanning."""
         if self.scanner is not None:
             _LOGGER.warning("Scanner already running")
             return
         
-        _LOGGER.info(f"Starting Elehant scanner on adapter {adapter}")
+        _LOGGER.info(f"Starting Elehant history scanner on adapter {self.adapter}")
         
         try:
-            # Load configured meters
-            await self._load_configured_meters()
-            
-            # Create scanner with detection callback
             self.scanner = BleakScanner(
                 detection_callback=self._detection_callback,
-                adapter=adapter,
+                adapter=self.adapter,
             )
-            
-            # Start scanning in background
             self._stop_event.clear()
             self._scan_task = asyncio.create_task(self._run_scanner())
-            
+            _LOGGER.info("Elehant history scanner started successfully")
         except Exception as e:
             _LOGGER.error(f"Failed to start scanner: {e}")
             self.scanner = None
             raise
 
-    async def _load_configured_meters(self) -> None:
-        """Load configured meters from hass data."""
-        configured = {}
-        
-        # Get all meter configurations
-        for key, value in self.hass.data.get(DOMAIN, {}).items():
-            if key.startswith("meter_"):
-                meter_config = value
-                serial = meter_config.get("serial")
-                if serial:
-                    configured[serial] = meter_config
-        
-        self.configured_meters = configured
-        _LOGGER.debug(f"Loaded {len(configured)} configured meters")
-
     async def _run_scanner(self) -> None:
         """Run scanner continuously."""
         try:
             await self.scanner.start()
-            _LOGGER.info("Scanner started successfully")
-            
-            # Keep running until stopped
             await self._stop_event.wait()
-            
         except asyncio.CancelledError:
             _LOGGER.debug("Scanner task cancelled")
         except Exception as e:
@@ -204,96 +175,95 @@ class ElehantScanner:
     def _detection_callback(
         self, device: BLEDevice, advertisement_data: AdvertisementData
     ) -> None:
-        """Handle device detection."""
-        # Log all BLE devices for debugging
-        _LOGGER.debug(f"BLE Device: {device.address} - RSSI: {advertisement_data.rssi} - Data: {advertisement_data.manufacturer_data}")
+        """Handle device detection and update history."""
+        # Отладка: видим все BLE устройства
+        _LOGGER.debug(f"BLE: {device.address} RSSI:{advertisement_data.rssi}")
         
-        # Check if it's an Elehant device by MAC prefix
-        if not device.address.startswith(MAC_PREFIX):
-            return
+        # Проверяем MAC
+        mac_info = extract_info_from_mac(device.address)
+        if not mac_info:
+            return  # Не наше устройство или неизвестная модель
         
-        _LOGGER.info(f"Found potential Elehant device: {device.address}")
+        # Парсим данные пакета
+        parsed = parse_meter_data(advertisement_data.manufacturer_data)
         
-        # Extract serial from MAC
-        mac_serial = extract_serial_from_mac(device.address)
-        if not mac_serial:
-            return
+        now = time.time()
+        mac = device.address
         
-        # Determine device type from MAC
-        device_type = get_device_type_from_mac(device.address)
-        
-        # Parse manufacturer data
-        parsed_data = parse_meter_data(advertisement_data.manufacturer_data)
-        
-        if parsed_data:
-            serial = parsed_data["serial"]
-            _LOGGER.info(
-                f"Valid Elehant packet from {device.address}: "
-                f"ID={serial}, Value={parsed_data['value']}, "
-                f"Temp={parsed_data['temperature']:.1f}°C"
-            )
-            
-            # Add to discovered devices
-            self.discovered_devices[device.address] = {
-                "serial": serial,
-                "device_type": device_type,
-                "mac": device.address,
-                "last_seen": parsed_data,
+        # Обновляем историю (в потокобезопасном режиме)
+        self.hass.loop.call_soon_threadsafe(
+            self._update_history, mac, mac_info, parsed, advertisement_data, now
+        )
+
+    def _update_history(self, mac: str, mac_info: dict, parsed: dict | None, adv_data: AdvertisementData, timestamp: float):
+        """Update the device history (runs in HA event loop)."""
+        if mac not in self.seen_devices:
+            # Новое устройство
+            self.seen_devices[mac] = {
+                "serial": mac_info["serial"],
+                "model": mac_info["model"],
+                "type_byte": mac_info["type_byte"],
+                "device_type": mac_info["device_type"],
+                "mac": mac,
+                "first_seen": timestamp,
+                "last_seen": timestamp,
+                "packets": 0,
+                "best_rssi": adv_data.rssi,
+                "manufacturer_data": {},
             }
+            _LOGGER.info(f"New Elehant device discovered: {mac} (SN:{mac_info['serial']}, Model:{mac_info['model']}, Type:{mac_info['device_type']})")
+        
+        # Обновляем существующее
+        device_info = self.seen_devices[mac]
+        device_info["last_seen"] = timestamp
+        device_info["packets"] += 1
+        if adv_data.rssi > device_info["best_rssi"]:
+            device_info["best_rssi"] = adv_data.rssi
+        
+        # Если есть данные счетчика, сохраняем последние показания
+        if parsed:
+            device_info["last_value"] = parsed["value"]
+            device_info["last_temperature"] = parsed["temperature"]
+            device_info["last_raw"] = parsed["raw_data"]
             
-            # Check if this meter is configured
-            if serial in self.configured_meters:
-                _LOGGER.debug(f"Updating data for configured meter {serial}")
-                
-                # Create update data
-                update_data = {
-                    "serial": serial,
-                    "value": parsed_data["value"],
-                    "temperature": parsed_data["temperature"],
-                    "rssi": device.rssi,
-                    "mac": device.address,
-                }
-                
-                # Update coordinator
-                self.hass.loop.call_soon_threadsafe(
-                    self._update_meter_data, serial, update_data
-                )
-        else:
-            _LOGGER.debug(f"Ignoring invalid Elehant packet from {device.address}")
+            # Если этот счетчик уже настроен, шлем обновление
+            self._notify_meter_update(mac_info["serial"], parsed, adv_data.rssi)
 
-    def _update_meter_data(self, serial: int, data: dict) -> None:
-        """Update meter data in Home Assistant."""
+    def _notify_meter_update(self, serial: int, parsed: dict, rssi: int):
+        """Notify a configured meter about new data."""
         coordinator_key = f"coordinator_{serial}"
-        if coordinator_key in self.hass.data[DOMAIN]:
+        if coordinator_key in self.hass.data.get(DOMAIN, {}):
             coordinator = self.hass.data[DOMAIN][coordinator_key]
-            coordinator.update_data(data)
-            
-            # Dispatch signal for sensors
-            async_dispatcher_send(self.hass, SIGNAL_NEW_DATA, data)
+            update_data = {
+                "serial": serial,
+                "value": parsed["value"],
+                "temperature": parsed["temperature"],
+                "rssi": rssi,
+            }
+            coordinator.update_data(update_data)
+            async_dispatcher_send(self.hass, SIGNAL_NEW_DATA, update_data)
 
-    def async_add_listener(self, callback: Callable) -> Callable:
-        """Add a listener for scanner events."""
-        self._callbacks.append(callback)
-        
-        def remove_listener():
-            self._callbacks.remove(callback)
-        
-        return remove_listener
+    def get_recent_devices(self, hours: int = 24) -> list[dict]:
+        """Get devices seen in the last N hours."""
+        now = time.time()
+        cutoff = now - (hours * 3600)
+        recent = []
+        for mac, info in self.seen_devices.items():
+            if info["last_seen"] >= cutoff:
+                recent.append({"mac": mac, **info})
+        return recent
 
-    async def stop(self) -> None:
+    async def stop(self):
         """Stop scanning."""
-        _LOGGER.info("Stopping Elehant scanner")
+        _LOGGER.info("Stopping Elehant history scanner")
         self._stop_event.set()
-        
         if self._scan_task and not self._scan_task.done():
             self._scan_task.cancel()
             try:
                 await self._scan_task
             except asyncio.CancelledError:
                 pass
-        
         if self.scanner:
             await self.scanner.stop()
             self.scanner = None
-        
-        _LOGGER.info("Scanner stopped")
+        _LOGGER.info("Elehant history scanner stopped")

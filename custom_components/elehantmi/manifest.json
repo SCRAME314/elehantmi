@@ -16,5 +16,6 @@
   "documentation": "https://github.com/SCRAME314/elehantmi",
   "issue_tracker": "https://github.com/SCRAME314/elehantmi/issues",
   "translations": ["translations/en.json", "translations/ru.json"],
-  "homeassistant": "2023.8.0"
+  "homeassistant": "2023.8.0",
+  "loggers": ["custom_components.elehantmi"]
 }

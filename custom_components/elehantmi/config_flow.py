@@ -49,12 +49,12 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.scan_task = None
 
     async def async_step_user(self, user_input=None):
-    """Handle the initial step."""
-    # Простое меню без description_platform для совместимости
-    return self.async_show_menu(
-        step_id="user",
-        menu_options=["manual_add", "auto_discover"],
-    )  # ✅ Скобка на уровне return
+        """Handle the initial step."""
+        # Простое меню без description_platform для совместимости
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["manual_add", "auto_discover"],
+        )  # ✅ Скобка на уровне return
 
     async def async_step_manual_add(
         self, user_input: Dict[str, Any] | None = None

@@ -206,7 +206,7 @@ class ElehantScanner:
     ) -> None:
         """Handle device detection."""
         # Log all BLE devices for debugging
-        _LOGGER.debug(f"BLE Device: {device.address} - RSSI: {device.rssi} - Data: {advertisement_data.manufacturer_data}")
+        _LOGGER.debug(f"BLE Device: {device.address} - RSSI: {advertisement_data.rssi} - Data: {advertisement_data.manufacturer_data}")
         
         # Check if it's an Elehant device by MAC prefix
         if not device.address.startswith(MAC_PREFIX):

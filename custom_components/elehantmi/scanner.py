@@ -134,7 +134,9 @@ class ElehantHistoryScanner:
         _LOGGER.info("Elehant History Scanner initialized with HA Bluetooth API")
 
     def _detection_callback(
-        self, service_info: bluetooth.BluetoothServiceInfoBleak
+        self, 
+        service_info: bluetooth.BluetoothServiceInfoBleak,
+        change: bluetooth.BluetoothChange
     ) -> None:
         """Handle device detection from HA Bluetooth API."""
         # Выводим всё для отладки

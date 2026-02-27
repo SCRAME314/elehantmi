@@ -113,7 +113,6 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
             sw_version="1.0",
-            via_device=(DOMAIN, "scanner"),
         )
 
     @callback

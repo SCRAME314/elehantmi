@@ -113,25 +113,24 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-async def async_step_auto_discover(self, user_input=None):
-    if user_input is None:
-        # запускаем сканирование
-        self.scan_task = asyncio.create_task(
-            self._scan_and_gather(self.hass.data[DOMAIN]["scanner"], DEFAULT_SCAN_TIMEOUT)
-        )
-        return self.async_show_progress(
-            step_id="auto_discover_progress",
-            progress_action="scanning",
-            progress_task=self.scan_task,
-        )
-    
-    # Когда сканирование завершено, переходим на промежуточный шаг
-    return await self.async_step_auto_discover_done()
+    # ---------- АВТОМАТИЧЕСКОЕ ОБНАРУЖЕНИЕ ----------
+    async def async_step_auto_discover(self, user_input=None):
+        """Start the discovery process."""
+        if user_input is None:
+            scanner = self.hass.data[DOMAIN]["scanner"]
+            self.scan_task = asyncio.create_task(
+                self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
+            )
+            return self.async_show_progress(
+                step_id="auto_discover_progress",
+                progress_action="scanning",
+                progress_task=self.scan_task,
+            )
+        
+        return await self.async_step_auto_discover_done()
 
     async def async_step_auto_discover_progress(self, user_input=None):
         """Step to show progress of scanning."""
-        # Этот шаг автоматически управляется HA
-        # Просто передаем управление дальше
         return await self.async_step_auto_discover_done()
 
     async def async_step_auto_discover_done(self, user_input=None):
@@ -144,20 +143,14 @@ async def async_step_auto_discover(self, user_input=None):
         """Wait for scan to complete and gather devices."""
         await asyncio.sleep(timeout)
         
-        # Собираем устройства из истории сканера, виденные за последние 24 часа
         recent = scanner.get_recent_devices(hours=24)
         
-        # Фильтруем уже настроенные
         self.discovered_devices = []
         for dev in recent:
             unique_id = str(dev["serial"])
-            # Проверяем, не настроено ли уже
             if self._async_current_ids().get(unique_id):
                 continue
             self.discovered_devices.append(dev)
-        
-        # Завершаем шаг прогресса (HA сам вызовет следующий шаг)
-        # Ничего не делаем, просто возвращаемся
 
     async def async_step_select_devices(self, user_input=None):
         """Let user select devices from the list."""
@@ -166,13 +159,11 @@ async def async_step_auto_discover(self, user_input=None):
             if not selected_macs:
                 return self.async_abort(reason="no_devices_selected")
             
-            # Переходим к конфигурации выбранных устройств
             self.selected_devices = [
                 dev for dev in self.discovered_devices if dev["mac"] in selected_macs
             ]
             return await self.async_step_configure_devices()
         
-        # Строим список опций для выбора
         options = []
         for dev in self.discovered_devices:
             last_seen_str = time.strftime(
@@ -202,7 +193,6 @@ async def async_step_auto_discover(self, user_input=None):
             meters = []
             for dev in self.selected_devices:
                 serial = dev["serial"]
-                # Еще раз проверяем, не добавили ли параллельно
                 if self._async_current_ids().get(str(serial)):
                     continue
                 
@@ -226,7 +216,6 @@ async def async_step_auto_discover(self, user_input=None):
             else:
                 errors["base"] = "all_devices_configured"
         
-        # Строим схему с полями для каждого устройства
         schema = {}
         for dev in self.selected_devices:
             serial = dev["serial"]

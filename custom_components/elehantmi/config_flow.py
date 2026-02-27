@@ -50,15 +50,12 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
-        # Простое меню без description_platform для совместимости
         return self.async_show_menu(
             step_id="user",
             menu_options=["manual_add", "auto_discover"],
-        )  # ✅ Скобка на уровне return
+        )
 
-    async def async_step_manual_add(
-        self, user_input: Dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_manual_add(self, user_input=None):
         """Handle manual addition of meter."""
         errors = {}
         
@@ -124,9 +121,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_auto_discover(
-        self, user_input: Dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_auto_discover(self, user_input=None):
         """Handle auto-discovery of meters."""
         errors = {}
         
@@ -185,9 +180,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_configure_devices(
-        self, user_input: Dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_configure_devices(self, user_input=None):
         """Configure discovered devices."""
         errors = {}
         
@@ -285,9 +278,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(
-        config_entry: config_entries.ConfigEntry,
-    ) -> config_entries.OptionsFlow:
+    def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
         return OptionsFlowHandler(config_entry)
 
@@ -295,13 +286,12 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Elehant Meter."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self, config_entry):
         """Initialize options flow."""
-        self.config_entry = config_entry
+        self._config_entry = config_entry
+        super().__init__()
 
-    async def async_step_init(
-        self, user_input: Dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_init(self, user_input=None):
         """Manage options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
@@ -314,7 +304,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Optional(
                     CONF_SELECTED_BT_ADAPTER,
-                    default=self.config_entry.options.get(CONF_SELECTED_BT_ADAPTER, "hci0"),
+                    default=self._config_entry.options.get(CONF_SELECTED_BT_ADAPTER, "hci0"),
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=adapters,
@@ -323,7 +313,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_SCAN_INTERVAL,
-                    default=self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                    default=self._config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=1,
@@ -340,7 +330,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         adapters = [{"value": "hci0", "label": "Default (hci0)"}]
         
         try:
-            # Try to get list of adapters from system
             import subprocess
             result = subprocess.run(["hciconfig"], capture_output=True, text=True)
             if result.returncode == 0:

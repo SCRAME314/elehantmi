@@ -30,6 +30,7 @@ from .const import (
     UNIT_CUBIC_METERS,
     UNIT_LITERS,
 )
+from .autodiscover import ElehantAutoDiscover
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -119,57 +120,103 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:
             scanner = self.hass.data[DOMAIN]["scanner"]
             
-            # Создаем задачу с обработкой отмены
-            async def _scan_with_cleanup():
-                try:
-                    await self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
-                except asyncio.CancelledError:
-                    _LOGGER.debug("Scan task cancelled by user")
-                    # Не пробрасываем дальше, чтобы не ломать flow
-                except Exception as err:
-                    _LOGGER.error("Scan task error: %s", err)
+            # Создаем объект автообнаружения
+            self.autodiscover = ElehantAutoDiscover(
+                hass=self.hass,
+                flow=self,
+                scanner=scanner,
+                timeout=300  # 5 минут
+            )
             
-            self.scan_task = asyncio.create_task(_scan_with_cleanup())
+            # Настраиваем колбэки
+            async def on_update():
+                """Called when new devices are found."""
+                if self.autodiscover.devices_count > 0:
+                    # Обновляем прогресс
+                    self.hass.async_create_task(
+                        self.hass.config_entries.flow.async_configure(
+                            flow_id=self.flow_id,
+                            user_input={"update": True}
+                        )
+                    )
+            
+            async def on_stop():
+                """Called when scan times out."""
+                # Автоматически переходим к выбору устройств
+                self.hass.async_create_task(
+                    self.hass.config_entries.flow.async_configure(
+                        flow_id=self.flow_id,
+                        user_input={"timeout": True}
+                    )
+                )
+            
+            self.autodiscover.on_update(on_update)
+            self.autodiscover.on_stop(on_stop)
+            
+            # Запускаем сканирование
+            await self.autodiscover.start_scan()
             
             return self.async_show_progress(
                 step_id="auto_discover_progress",
                 progress_action="scanning",
-                progress_task=self.scan_task,
+                progress_task=self.autodiscover.scan_task,
             )
         
         return await self.async_step_auto_discover_done()
 
     async def async_step_auto_discover_progress(self, user_input=None):
         """Step to show progress of scanning."""
-        # Проверяем, не была ли задача отменена
-        if self.scan_task and self.scan_task.cancelled():
-            return self.async_abort(reason="scan_cancelled")
+        # Проверяем, что autodiscover существует
+        if not hasattr(self, 'autodiscover'):
+            return self.async_abort(reason="scan_failed")
         
-        return await self.async_step_auto_discover_done()
+        # Если задача отменена или завершилась ошибкой
+        if self.autodiscover.scan_task and self.autodiscover.scan_task.done():
+            if self.autodiscover.scan_task.cancelled():
+                return self.async_abort(reason="scan_cancelled")
+            if self.autodiscover.scan_task.exception():
+                _LOGGER.error("Auto-discover failed: %s", self.autodiscover.scan_task.exception())
+                return self.async_abort(reason="scan_failed")
+        
+        # Если пользователь нажал "Остановить"
+        if user_input and user_input.get("stop"):
+            self.autodiscover.stop_scan()
+            return await self.async_step_auto_discover_done()
+        
+        # Если достигнут таймаут
+        if user_input and user_input.get("timeout"):
+            return await self.async_step_auto_discover_done()
+        
+        # Формируем описание с таймером и количеством найденных устройств
+        return self.async_show_progress(
+            step_id="auto_discover_progress",
+            progress_action="scanning",
+            progress_task=self.autodiscover.scan_task,
+            description_placeholders={
+                "time": self.autodiscover.time_elapsed,
+                "count": str(self.autodiscover.devices_count)
+            },
+            # Кнопка "Остановить"
+            step_user_input_schema=vol.Schema({
+                vol.Optional("stop"): str,
+            }),
+        )
 
     async def async_step_auto_discover_done(self, user_input=None):
         """Handle completion of auto discovery."""
-        if not self.discovered_devices:
+        # Останавливаем сканирование если оно еще идет
+        if hasattr(self, 'autodiscover'):
+            self.autodiscover.stop_scan()
+            discovered = self.autodiscover.discovered_devices
+        else:
+            discovered = []
+        
+        if not discovered:
             return self.async_abort(reason="no_devices_found")
+        
+        # Передаем найденные устройства в основной flow
+        self.discovered_devices = discovered
         return await self.async_step_select_devices()
-
-    async def _scan_and_gather(self, scanner, timeout: int):
-        """Wait for scan to complete and gather devices."""
-        try:
-            await asyncio.sleep(timeout)
-            
-            recent = scanner.get_recent_devices(hours=24)
-            
-            self.discovered_devices = []
-            for dev in recent:
-                unique_id = str(dev["serial"])
-                if unique_id in self._async_current_ids():
-                    continue
-                self.discovered_devices.append(dev)
-                
-        except asyncio.CancelledError:
-            _LOGGER.debug("Scan cancelled")
-            raise  # Пробрасываем для обработки в _scan_with_cleanup
 
     async def async_step_select_devices(self, user_input=None):
         """Let user select devices from the list."""

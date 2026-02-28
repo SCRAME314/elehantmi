@@ -30,7 +30,7 @@
       },
       "auto_discover_progress": {
         "title": "Discovering Elehant Meters",
-        "description": "Scanning for devices. This will take up to 60 seconds..."
+        "description": "⏱️ **Scan time:** {time}\n\n📊 **Devices found:** {count}\n\n📋 **Recent events:**\n```\n{logs}\n```"
       },
       "select_devices": {
         "title": "Select Elehant Meters",
@@ -67,7 +67,9 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "no_devices_found": "No new Elehant devices found in the last 24 hours. Make sure your meters are transmitting and try again."
+      "no_devices_found": "No new Elehant devices found in the last 24 hours. Make sure your meters are transmitting and try again.",
+      "scan_cancelled": "Scan was cancelled by user",
+      "scan_failed": "Scan failed. Check logs for details."
     }
   },
   "entity": {

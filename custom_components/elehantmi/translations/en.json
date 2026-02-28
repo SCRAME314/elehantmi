@@ -68,8 +68,7 @@
     "abort": {
       "already_configured": "Device is already configured",
       "no_devices_found": "No new Elehant devices found in the last 24 hours. Make sure your meters are transmitting and try again.",
-      "scan_cancelled": "Scan was cancelled by user",
-      "scan_failed": "Scan failed. Check logs for details."
+      "no_scanner": "Bluetooth scanner not initialized. Please add at least one meter manually first to start background scanning."
     }
   },
   "entity": {

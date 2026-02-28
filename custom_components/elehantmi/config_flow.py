@@ -119,6 +119,15 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_auto_discover(self, user_input=None):
         """Start the discovery process."""
         if user_input is None:
+            # Проверяем, есть ли сканер
+            if DOMAIN not in self.hass.data or "scanner" not in self.hass.data[DOMAIN]:
+                # Сканера нет - показываем сообщение и предлагаем добавить вручную
+                return self.async_abort(
+                    reason="no_scanner",
+                    description_placeholders={
+                        "scan_timeout": str(DEFAULT_SCAN_TIMEOUT)
+                }
+            )
             scanner = self.hass.data[DOMAIN]["scanner"]
             
             # Создаем объект автообнаружения

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Coroutine
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigFlow
@@ -35,8 +35,8 @@ class ElehantAutoDiscover:
         self.scan_task: asyncio.Task | None = None
         self.start_time: float | None = None
         self.duration: int = 0
-        self._update_callback: Callable | None = None
-        self._stop_callback: Callable | None = None
+        self._update_callback: Callable[[], Coroutine] | None = None
+        self._stop_callback: Callable[[], Coroutine] | None = None
 
     async def start_scan(self) -> None:
         """Start background scanning."""
@@ -65,9 +65,9 @@ class ElehantAutoDiscover:
                         self.discovered_devices = new_devices
                         _LOGGER.info(f"Найдено {len(new_devices)} новых устройств")
                         
-                        # Вызываем колбэк обновления
+                        # Вызываем колбэк обновления с await
                         if self._update_callback:
-                            self._update_callback()
+                            await self._update_callback()
                     
                     # Обновляем время
                     self.duration = int(time.time() - self.start_time)
@@ -76,7 +76,7 @@ class ElehantAutoDiscover:
                     if self.duration > self.timeout:
                         _LOGGER.info(f"Достигнут таймаут сканирования ({self.timeout} сек)")
                         if self._stop_callback:
-                            self._stop_callback()
+                            await self._stop_callback()
                         break
                         
             except asyncio.CancelledError:
@@ -113,10 +113,10 @@ class ElehantAutoDiscover:
         """Get number of discovered devices."""
         return len(self.discovered_devices)
 
-    def on_update(self, callback: Callable) -> None:
+    def on_update(self, callback: Callable[[], Coroutine]) -> None:
         """Set callback for updates."""
         self._update_callback = callback
 
-    def on_stop(self, callback: Callable) -> None:
+    def on_stop(self, callback: Callable[[], Coroutine]) -> None:
         """Set callback for stop (timeout)."""
         self._stop_callback = callback

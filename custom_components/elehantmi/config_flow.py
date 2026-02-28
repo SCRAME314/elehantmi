@@ -23,7 +23,6 @@ from .const import (
     CONF_SELECTED_BT_ADAPTER,
     CONF_UNITS,
     DEFAULT_SCAN_INTERVAL,
-    DEFAULT_SCAN_TIMEOUT,
     DEVICE_TYPE_GAS,
     DEVICE_TYPE_WATER,
     DOMAIN,
@@ -43,7 +42,9 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self):
         """Initialize the config flow."""
         self.discovered_devices = []
+        self.selected_devices = []
         self.scan_task: asyncio.Task | None = None
+        self.autodiscover: ElehantAutoDiscover | None = None
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
@@ -128,27 +129,32 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 timeout=300  # 5 минут
             )
             
-            # Настраиваем колбэки
-            async def on_update():
+            # Настраиваем колбэки (обычные функции, не async!)
+            def on_update():
                 """Called when new devices are found."""
-                if self.autodiscover.devices_count > 0:
+                if self.autodiscover and self.autodiscover.devices_count > 0:
                     # Обновляем прогресс
-                    self.hass.async_create_task(
-                        self.hass.config_entries.flow.async_configure(
-                            flow_id=self.flow_id,
-                            user_input={"update": True}
+                    self.hass.loop.call_soon_threadsafe(
+                        lambda: self.hass.async_create_task(
+                            self.hass.config_entries.flow.async_configure(
+                                flow_id=self.flow_id,
+                                user_input={"update": True}
+                            )
                         )
                     )
-            
-            async def on_stop():
+
+            def on_stop():
                 """Called when scan times out."""
-                # Автоматически переходим к выбору устройств
-                self.hass.async_create_task(
-                    self.hass.config_entries.flow.async_configure(
-                        flow_id=self.flow_id,
-                        user_input={"timeout": True}
+                if self.autodiscover:
+                    # Автоматически переходим к выбору устройств
+                    self.hass.loop.call_soon_threadsafe(
+                        lambda: self.hass.async_create_task(
+                            self.hass.config_entries.flow.async_configure(
+                                flow_id=self.flow_id,
+                                user_input={"timeout": True}
+                            )
+                        )
                     )
-                )
             
             self.autodiscover.on_update(on_update)
             self.autodiscover.on_stop(on_stop)
@@ -167,7 +173,7 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_auto_discover_progress(self, user_input=None):
         """Step to show progress of scanning."""
         # Проверяем, что autodiscover существует
-        if not hasattr(self, 'autodiscover'):
+        if not hasattr(self, 'autodiscover') or not self.autodiscover:
             return self.async_abort(reason="scan_failed")
         
         # Если задача отменена или завершилась ошибкой
@@ -187,25 +193,36 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input and user_input.get("timeout"):
             return await self.async_step_auto_discover_done()
         
-        # Формируем описание с таймером и количеством найденных устройств
+        # Формируем описание с таймером, счетчиком и логами
+        description = (
+            f"⏱️ **Время сканирования:** {self.autodiscover.time_elapsed}\n\n"
+            f"📊 **Найдено устройств:** {self.autodiscover.devices_count}\n\n"
+            f"📋 **Последние события:**\n```\n{self.autodiscover.logs_text}\n```"
+        )
+        
         return self.async_show_progress(
             step_id="auto_discover_progress",
             progress_action="scanning",
             progress_task=self.autodiscover.scan_task,
             description_placeholders={
                 "time": self.autodiscover.time_elapsed,
-                "count": str(self.autodiscover.devices_count)
+                "count": str(self.autodiscover.devices_count),
+                "logs": self.autodiscover.logs_text
             },
-            # Кнопка "Остановить"
             step_user_input_schema=vol.Schema({
-                vol.Optional("stop"): str,
+                vol.Optional("stop"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["⏹️ Остановить сканирование"],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
             }),
         )
 
     async def async_step_auto_discover_done(self, user_input=None):
         """Handle completion of auto discovery."""
         # Останавливаем сканирование если оно еще идет
-        if hasattr(self, 'autodiscover'):
+        if hasattr(self, 'autodiscover') and self.autodiscover:
             self.autodiscover.stop_scan()
             discovered = self.autodiscover.discovered_devices
         else:
@@ -235,7 +252,12 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             last_seen_str = time.strftime(
                 "%H:%M %d.%m", time.localtime(dev["last_seen"])
             )
-            label = f"{dev['device_type'].upper()}: {dev['serial']} (модель {dev['model']}, RSSI:{dev['best_rssi']}) - last seen: {last_seen_str}"
+            device_icon = "🔥" if dev['device_type'] == 'gas' else "💧"
+            label = (
+                f"{device_icon} {dev['device_type'].upper()}: {dev['serial']} "
+                f"(модель {dev['model']}, RSSI:{dev['best_rssi']}) - "
+                f"последний раз: {last_seen_str}"
+            )
             options.append({"value": dev["mac"], "label": label})
         
         return self.async_show_form(

@@ -17,7 +17,6 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_SERIAL,
     CONF_DEVICE_TYPE,
-    CONF_LOCATION,
     CONF_MANUAL_METERS,
     CONF_SCAN_INTERVAL,
     CONF_SELECTED_BT_ADAPTER,
@@ -41,15 +40,11 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self):
         """Initialize the config flow."""
-        self.discovered_devices = []
-        self.scan_task: asyncio.Task | None = None
+        pass
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
-        return self.async_show_menu(
-            step_id="user",
-            menu_options=["manual_add", "auto_discover"],
-        )
+        return await self.async_step_manual_add()
 
     # ---------- РУЧНОЕ ДОБАВЛЕНИЕ ----------
     async def async_step_manual_add(self, user_input=None):
@@ -69,7 +64,6 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_DEVICE_TYPE: user_input[CONF_DEVICE_TYPE],
                         CONF_DEVICE_NAME: user_input[CONF_DEVICE_NAME],
                         CONF_UNITS: user_input[CONF_UNITS],
-                        CONF_LOCATION: user_input.get(CONF_LOCATION, ""),
                     }]
                 },
                 options={
@@ -102,7 +96,6 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Required(CONF_DEVICE_NAME, default="Elehant Meter"): str,
-                vol.Optional(CONF_LOCATION): str,
                 vol.Optional(CONF_SELECTED_BT_ADAPTER, default="hci0"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=adapters,
@@ -110,150 +103,6 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 ),
             }),
-            errors=errors,
-        )
-
-    # ---------- АВТОМАТИЧЕСКОЕ ОБНАРУЖЕНИЕ ----------
-    async def async_step_auto_discover(self, user_input=None):
-        """Start the discovery process."""
-        if user_input is None:
-            scanner = self.hass.data[DOMAIN]["scanner"]
-            
-            # Создаем задачу с обработкой отмены
-            async def _scan_with_cleanup():
-                try:
-                    await self._scan_and_gather(scanner, DEFAULT_SCAN_TIMEOUT)
-                except asyncio.CancelledError:
-                    _LOGGER.debug("Scan task cancelled by user")
-                    # Не пробрасываем дальше, чтобы не ломать flow
-                except Exception as err:
-                    _LOGGER.error("Scan task error: %s", err)
-            
-            self.scan_task = asyncio.create_task(_scan_with_cleanup())
-            
-            return self.async_show_progress(
-                step_id="auto_discover_progress",
-                progress_action="scanning",
-                progress_task=self.scan_task,
-            )
-        
-        return await self.async_step_auto_discover_done()
-
-    async def async_step_auto_discover_progress(self, user_input=None):
-        """Step to show progress of scanning."""
-        # Проверяем, не была ли задача отменена
-        if self.scan_task and self.scan_task.cancelled():
-            return self.async_abort(reason="scan_cancelled")
-        
-        return await self.async_step_auto_discover_done()
-
-    async def async_step_auto_discover_done(self, user_input=None):
-        """Handle completion of auto discovery."""
-        if not self.discovered_devices:
-            return self.async_abort(reason="no_devices_found")
-        return await self.async_step_select_devices()
-
-    async def _scan_and_gather(self, scanner, timeout: int):
-        """Wait for scan to complete and gather devices."""
-        try:
-            await asyncio.sleep(timeout)
-            
-            recent = scanner.get_recent_devices(hours=24)
-            
-            self.discovered_devices = []
-            for dev in recent:
-                unique_id = str(dev["serial"])
-                if unique_id in self._async_current_ids():
-                    continue
-                self.discovered_devices.append(dev)
-                
-        except asyncio.CancelledError:
-            _LOGGER.debug("Scan cancelled")
-            raise  # Пробрасываем для обработки в _scan_with_cleanup
-
-    async def async_step_select_devices(self, user_input=None):
-        """Let user select devices from the list."""
-        if user_input is not None:
-            selected_macs = user_input.get("devices", [])
-            if not selected_macs:
-                return self.async_abort(reason="no_devices_selected")
-            
-            self.selected_devices = [
-                dev for dev in self.discovered_devices if dev["mac"] in selected_macs
-            ]
-            return await self.async_step_configure_devices()
-        
-        options = []
-        for dev in self.discovered_devices:
-            last_seen_str = time.strftime(
-                "%H:%M %d.%m", time.localtime(dev["last_seen"])
-            )
-            label = f"{dev['device_type'].upper()}: {dev['serial']} (модель {dev['model']}, RSSI:{dev['best_rssi']}) - last seen: {last_seen_str}"
-            options.append({"value": dev["mac"], "label": label})
-        
-        return self.async_show_form(
-            step_id="select_devices",
-            data_schema=vol.Schema({
-                vol.Required("devices"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=options,
-                        multiple=True,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                )
-            }),
-        )
-
-    async def async_step_configure_devices(self, user_input=None):
-        """Configure each selected device."""
-        errors = {}
-        
-        if user_input is not None:
-            meters = []
-            for dev in self.selected_devices:
-                serial = dev["serial"]
-                if str(serial) in self._async_current_ids():
-                    continue
-                
-                meters.append({
-                    CONF_DEVICE_SERIAL: serial,
-                    CONF_DEVICE_TYPE: dev["device_type"],
-                    CONF_DEVICE_NAME: user_input.get(
-                        f"name_{serial}",
-                        f"Elehant {dev['device_type'].capitalize()} {serial}"
-                    ),
-                    CONF_UNITS: user_input.get(f"units_{serial}", UNIT_CUBIC_METERS),
-                    CONF_LOCATION: user_input.get(f"location_{serial}", ""),
-                })
-            
-            if meters:
-                return self.async_create_entry(
-                    title="Elehant Meters",
-                    data={CONF_MANUAL_METERS: meters},
-                    options={},
-                )
-            else:
-                errors["base"] = "all_devices_configured"
-        
-        schema = {}
-        for dev in self.selected_devices:
-            serial = dev["serial"]
-            default_name = f"Elehant {dev['device_type'].capitalize()} {serial}"
-            schema[vol.Required(f"name_{serial}", default=default_name)] = str
-            schema[vol.Optional(f"location_{serial}", default="")] = str
-            schema[vol.Required(f"units_{serial}", default=UNIT_CUBIC_METERS)] = selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        {"value": UNIT_CUBIC_METERS, "label": "Cubic meters (m³)"},
-                        {"value": UNIT_LITERS, "label": "Liters"},
-                    ],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            )
-        
-        return self.async_show_form(
-            step_id="configure_devices",
-            data_schema=vol.Schema(schema),
             errors=errors,
         )
 

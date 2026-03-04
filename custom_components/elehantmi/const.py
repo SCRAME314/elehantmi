@@ -15,7 +15,7 @@ STORAGE_VERSION = 1
 CONF_DEVICE_SERIAL = "serial"
 CONF_DEVICE_TYPE = "device_type"
 CONF_DEVICE_NAME = "name"
-CONF_LOCATION = "location"
+
 CONF_UNITS = "units"
 CONF_MANUAL_METERS = "manual_meters"
 CONF_SCAN_INTERVAL = "scan_interval"

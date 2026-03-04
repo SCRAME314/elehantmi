@@ -198,7 +198,7 @@ class ElehantHistoryScanner:
         if parsed:
            _LOGGER.info(f"Получены данные от счетчика {parsed['serial']}: значение={parsed['value']}, температура={parsed['temperature']}°C")
         else:
-            _LOGGER.warning(f"Не удалось распарсить данные от {service_info.address}")
+            _LOGGER.warning(f"Не удалось распарсить данные от {service_info.address}, raw data: {service_info.manufacturer_data}")
         
         now = time.time()
         mac = service_info.address

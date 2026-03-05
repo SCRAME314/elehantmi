@@ -64,16 +64,7 @@ MAC_PREFIXES = {"B0:", "B1:"}
 MAC_MODEL_IDX = 1
 MAC_TYPE_IDX = 2
 
-# Gas models (твои данные)
-GAS_MODELS = {
-    1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 32, 33, 34, 35, 36, 48, 49, 50, 51, 52,
-    64, 65, 66, 67, 68, 80, 81, 82, 83, 84
-}
 
-# Water models (твои данные)
-WATER_MODELS = {
-    1, 2, 3, 4, 5, 6
-}
 
 # Sensor units
 UNIT_TEMPERATURE = UnitOfTemperature.CELSIUS

@@ -124,47 +124,7 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
         raise NotImplementedError
 
 
-class ElehantMeterSensor(ElehantBaseSensor):
-    """Sensor for meter readings."""
 
-    def __init__(self, coordinator, serial, device_type, device_name, units, location=""):
-        super().__init__(coordinator, serial, device_type, device_name, SENSOR_TYPE_METER, location)
-        self._units = units
-        self._attr_name = f"{device_name} Reading"
-        self._attr_state_class = STATE_CLASS_TOTAL_INCREASING
-        
-        if device_type == DEVICE_TYPE_GAS:
-            self._attr_device_class = SensorDeviceClass.GAS
-            self._attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
-        else:
-            self._attr_device_class = SensorDeviceClass.WATER
-            self._attr_native_unit_of_measurement = (
-                UnitOfVolume.CUBIC_METERS if units == UNIT_CUBIC_METERS else UnitOfVolume.LITERS
-            )
-
-    def _get_state_from_data(self, data: dict) -> float | None:
-        if "value" not in data:
-            return None
-        raw_value = data["value"]
-        
-        # According to packet structure:
-        # Raw value represents 0.1 liters (stored as integer)
-        # So for liters we divide by 10 (raw_value / 10)
-        # For cubic meters we divide by 10000 (raw_value / 10000) since 1 m³ = 1000 L and value is in 0.1 L
-        if self._device_type == DEVICE_TYPE_GAS:
-            if self._attr_native_unit_of_measurement == UnitOfVolume.CUBIC_METERS:
-                # For gas in cubic meters: raw_value / 10000 (raw_value * 0.0001)
-                return raw_value / 10000
-            else:
-                # For gas in liters: raw_value / 10 (since raw value represents 0.1 liters)
-                return raw_value / 10
-        else:  # Water meter
-            if self._attr_native_unit_of_measurement == UnitOfVolume.CUBIC_METERS:
-                # For water in cubic meters: raw_value / 10000 (raw_value * 0.0001)
-                return raw_value / 10000
-            else:
-                # For water in liters: raw_value / 10 (since raw value represents 0.1 liters)
-                return raw_value / 10
 
 
 class ElehantTemperatureSensor(ElehantBaseSensor):

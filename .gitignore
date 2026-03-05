@@ -1,24 +1,57 @@
-(custom_components/elehantmi/__pycache__/,
-*.pyc
+```
+# Python
 __pycache__/
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
-env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
 venv/
+ENV/
+env/
 .venv/
-.env
-.env.local
-.env.*
-.pytest_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-*.log
-*.tmp
-*.swp
+.env/
+
+# IDE
 .vscode/
 .idea/
-Thumbs.db
+*.swp
+*.swo
+*.tmp
+
+# OS
 .DS_Store
-)
+Thumbs.db
+
+# Logs
+*.log
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Environment variables
+.env
+.env.local
+*.env.*
+
+# MyPy
+.mypy_cache/
+```

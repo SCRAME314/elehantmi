@@ -71,10 +71,12 @@
     }
   },
   "entity": {
-    "sensor": {
+    "counter": {
       "reading": {
         "name": "Показания"
-      },
+      }
+    },
+    "sensor": {
       "temperature": {
         "name": "Температура"
       },

@@ -15,7 +15,6 @@ from .const import (
     DEVICE_TYPE_WATER,
     DOMAIN,
     ELEHANT_MARKER,
-    GAS_MODELS,
     IDX_MARKER,
     IDX_SERIAL_END,
     IDX_SERIAL_START,
@@ -28,7 +27,6 @@ from .const import (
     MAC_TYPE_IDX,
     SEPARATOR,
     SIGNAL_NEW_DATA,
-    WATER_MODELS,
 )
 
 _LOGGER = logging.getLogger(__name__)

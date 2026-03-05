@@ -7,6 +7,7 @@
   "codeowners": ["@SCRAME314"],
   "config_flow": true,
   "iot_class": "local_push",
+  "icons": ["brand/icon.png", "brand/icon@2x.png","brand/logo.png"],
   "bluetooth": [
     {
       "connectable": false

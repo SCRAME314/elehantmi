@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -125,7 +126,7 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
         raise NotImplementedError
 
 
-class ElehantMeterSensor(ElehantBaseSensor):
+class ElehantMeterSensor(ElehantBaseSensor, RestoreEntity):
     """Sensor for meter readings."""
 
     def __init__(self, coordinator, serial, device_type, device_name, units, location=""):
@@ -142,6 +143,12 @@ class ElehantMeterSensor(ElehantBaseSensor):
             self._attr_native_unit_of_measurement = (
                 UnitOfVolume.CUBIC_METERS if units == UNIT_CUBIC_METERS else UnitOfVolume.LITERS
             )
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known state."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None:
+            self._attr_native_value = last_state.state
 
     def _get_state_from_data(self, data: dict) -> float | None:
         if "value" not in data:

@@ -72,7 +72,6 @@ async def async_setup_entry(
             coordinator = hass.data[DOMAIN][coord_key]
         
         entities.extend([
-            ElehantMeterSensor(coordinator, serial, device_type, device_name, units, location),
             ElehantTemperatureSensor(coordinator, serial, device_type, device_name, location),
             ElehantBatterySensor(coordinator, serial, device_type, device_name, location),
         ])

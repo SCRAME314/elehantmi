@@ -52,22 +52,13 @@ def extract_info_from_mac(mac: str) -> dict | None:
         type_byte = int(type_hex, 16)
         serial = int(serial_hex, 16)
         
-        # Определяем тип устройства по модели
-        device_type = None
-        if model in GAS_MODELS:
-            device_type = DEVICE_TYPE_GAS
-        elif model in WATER_MODELS:
-            device_type = DEVICE_TYPE_WATER
-        else:
-            # Временно принимаем любые B0 для отладки
-            _LOGGER.debug(f"Unknown model {model} for MAC {mac}, but accepting")
-            device_type = DEVICE_TYPE_WATER if type_byte in [0x02, 0x03, 0x04] else DEVICE_TYPE_GAS
-        
+        # Возвращаем информацию из MAC, но не определяем тип устройства по модели
+        # Тип устройства будет определен при настройке интеграции
         return {
             "serial": serial,
             "model": model,
             "type_byte": type_byte,
-            "device_type": device_type,
+            "device_type": None,  # Не определяем тип по MAC
             "mac": mac,
         }
     except (ValueError, IndexError) as e:
@@ -233,6 +224,21 @@ class ElehantHistoryScanner:
             device_info["last_value"] = parsed["value"]
             device_info["last_temperature"] = parsed["temperature"]
             device_info["last_raw"] = parsed["raw_data"]
+            
+            # Используем тип устройства из конфигурации, а не из MAC
+            # Если устройство уже настроено, используем его тип
+            configured_device_type = None
+            for key, meter_config in self.hass.data.get(DOMAIN, {}).items():
+                if key.startswith("meter_") and meter_config.get(CONF_DEVICE_SERIAL) == mac_info["serial"]:
+                    configured_device_type = meter_config.get(CONF_DEVICE_TYPE)
+                    break
+            
+            # Если тип устройства известен из настройки, используем его
+            if configured_device_type:
+                device_info["device_type"] = configured_device_type
+            elif device_info["device_type"] is None:
+                # Если тип все еще не определен, используем информацию из MAC как резерв
+                device_info["device_type"] = mac_info["device_type"]
             
             # Если этот счетчик уже настроен, шлем обновление
             self._notify_meter_update(mac_info["serial"], parsed, service_info.rssi)

@@ -89,31 +89,28 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
     if not data:
         return None
     
-    # Минимальная длина: если есть заголовок 14FFFFFF - 21 байт, если нет - 17 байт
-    if len(data) not in (17, 21):
+    # Проверяем минимальную длину данных
+    if len(data) < 16:  # Минимальная длина для разбора основных полей
         _LOGGER.debug(f"Неверная длина данных: {len(data)} байт")
         return None
     
-    # Определяем смещение: есть ли заголовок?
-    offset = 0
-    if len(data) == 21 and data[0] == 0x14 and data[1] == 0xFF and data[2] == 0xFF and data[3] == 0xFF:
-        offset = 4
-        _LOGGER.debug("Найден заголовок 14FFFFFF, смещение 4")
-    elif len(data) == 17:
-        offset = 0
-        _LOGGER.debug("Пакет без заголовка, смещение 0")
-    else:
-        _LOGGER.debug(f"Неизвестный формат пакета: {data.hex()}")
+    # Проверяем маркер Elehant (0x80) - может быть на разных позициях
+    marker_pos = -1
+    for i in range(min(4, len(data))):  # Ищем маркер в первых 4 байтах
+        if data[i] == ELEHANT_MARKER:
+            marker_pos = i
+            break
+    
+    if marker_pos == -1:
+        _LOGGER.debug(f"Маркер Elehant (0x{ELEHANT_MARKER:02X}) не найден")
         return None
     
-    # Проверяем маркер Elehant (0x80)
-    if data[offset] != ELEHANT_MARKER:
-        _LOGGER.debug(f"Неверный маркер: 0x{data[offset]:02X}")
-        return None
+    offset = marker_pos
+    _LOGGER.debug(f"Найден маркер Elehant на позиции {offset}, длина данных: {len(data)}")
     
-    # Проверяем разделитель 0x7F (он должен быть на позиции offset+13)
-    if data[offset + 13] != SEPARATOR:
-        _LOGGER.debug(f"Неверный разделитель: 0x{data[offset + 13]:02X}")
+    # Проверяем, достаточно ли данных для разбора
+    if len(data) - offset < 16:  # Нужно минимум 16 байт после маркера
+        _LOGGER.debug(f"Недостаточно данных для разбора: {len(data)-offset} байт после маркера")
         return None
     
     try:
@@ -141,7 +138,7 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
             "raw_data": data.hex(),
         }
     except Exception as e:
-        _LOGGER.debug(f"Ошибка парсинга: {e}")
+        _LOGGER.debug(f"Ошибка парсинга: {e}, данные: {data.hex()}")
         return None
 
 

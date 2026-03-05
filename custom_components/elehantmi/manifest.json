@@ -1,7 +1,7 @@
 {
   "domain": "elehantmi",
   "name": "Elehant Meter Integration",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "requirements": [],
   "dependencies": ["bluetooth"],
   "codeowners": ["@SCRAME314"],

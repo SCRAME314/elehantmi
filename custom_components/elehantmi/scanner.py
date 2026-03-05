@@ -11,6 +11,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
+    CONF_DEVICE_SERIAL,
+    CONF_DEVICE_TYPE,
     DEVICE_TYPE_GAS,
     DEVICE_TYPE_WATER,
     DOMAIN,

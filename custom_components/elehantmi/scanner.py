@@ -11,11 +11,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
+    CONF_DEVICE_SERIAL,
+    CONF_DEVICE_TYPE,
     DEVICE_TYPE_GAS,
     DEVICE_TYPE_WATER,
     DOMAIN,
     ELEHANT_MARKER,
-    GAS_MODELS,
     IDX_MARKER,
     IDX_SERIAL_END,
     IDX_SERIAL_START,
@@ -28,7 +29,6 @@ from .const import (
     MAC_TYPE_IDX,
     SEPARATOR,
     SIGNAL_NEW_DATA,
-    WATER_MODELS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -52,22 +52,13 @@ def extract_info_from_mac(mac: str) -> dict | None:
         type_byte = int(type_hex, 16)
         serial = int(serial_hex, 16)
         
-        # Определяем тип устройства по модели
-        device_type = None
-        if model in GAS_MODELS:
-            device_type = DEVICE_TYPE_GAS
-        elif model in WATER_MODELS:
-            device_type = DEVICE_TYPE_WATER
-        else:
-            # Временно принимаем любые B0 для отладки
-            _LOGGER.debug(f"Unknown model {model} for MAC {mac}, but accepting")
-            device_type = DEVICE_TYPE_WATER if type_byte in [0x02, 0x03, 0x04] else DEVICE_TYPE_GAS
-        
+        # Возвращаем информацию из MAC, но не определяем тип устройства по модели
+        # Тип устройства будет определен при настройке интеграции
         return {
             "serial": serial,
             "model": model,
             "type_byte": type_byte,
-            "device_type": device_type,
+            "device_type": None,  # Не определяем тип по MAC
             "mac": mac,
         }
     except (ValueError, IndexError) as e:
@@ -89,31 +80,28 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
     if not data:
         return None
     
-    # Минимальная длина: если есть заголовок 14FFFFFF - 21 байт, если нет - 17 байт
-    if len(data) not in (17, 21):
+    # Проверяем минимальную длину данных
+    if len(data) < 16:  # Минимальная длина для разбора основных полей
         _LOGGER.debug(f"Неверная длина данных: {len(data)} байт")
         return None
     
-    # Определяем смещение: есть ли заголовок?
-    offset = 0
-    if len(data) == 21 and data[0] == 0x14 and data[1] == 0xFF and data[2] == 0xFF and data[3] == 0xFF:
-        offset = 4
-        _LOGGER.debug("Найден заголовок 14FFFFFF, смещение 4")
-    elif len(data) == 17:
-        offset = 0
-        _LOGGER.debug("Пакет без заголовка, смещение 0")
-    else:
-        _LOGGER.debug(f"Неизвестный формат пакета: {data.hex()}")
+    # Проверяем маркер Elehant (0x80) - может быть на разных позициях
+    marker_pos = -1
+    for i in range(min(4, len(data))):  # Ищем маркер в первых 4 байтах
+        if data[i] == ELEHANT_MARKER:
+            marker_pos = i
+            break
+    
+    if marker_pos == -1:
+        _LOGGER.debug(f"Маркер Elehant (0x{ELEHANT_MARKER:02X}) не найден")
         return None
     
-    # Проверяем маркер Elehant (0x80)
-    if data[offset] != ELEHANT_MARKER:
-        _LOGGER.debug(f"Неверный маркер: 0x{data[offset]:02X}")
-        return None
+    offset = marker_pos
+    _LOGGER.debug(f"Найден маркер Elehant на позиции {offset}, длина данных: {len(data)}")
     
-    # Проверяем разделитель 0x7F (он должен быть на позиции offset+13)
-    if data[offset + 13] != SEPARATOR:
-        _LOGGER.debug(f"Неверный разделитель: 0x{data[offset + 13]:02X}")
+    # Проверяем, достаточно ли данных для разбора
+    if len(data) - offset < 16:  # Нужно минимум 16 байт после маркера
+        _LOGGER.debug(f"Недостаточно данных для разбора: {len(data)-offset} байт после маркера")
         return None
     
     try:
@@ -141,7 +129,7 @@ def parse_meter_data(manufacturer_data: dict[int, bytes]) -> dict[str, Any] | No
             "raw_data": data.hex(),
         }
     except Exception as e:
-        _LOGGER.debug(f"Ошибка парсинга: {e}")
+        _LOGGER.debug(f"Ошибка парсинга: {e}, данные: {data.hex()}")
         return None
 
 
@@ -198,7 +186,7 @@ class ElehantHistoryScanner:
         if parsed:
            _LOGGER.info(f"Получены данные от счетчика {parsed['serial']}: значение={parsed['value']}, температура={parsed['temperature']}°C")
         else:
-            _LOGGER.warning(f"Не удалось распарсить данные от {service_info.address}")
+            _LOGGER.warning(f"Не удалось распарсить данные от {service_info.address}, raw data: {service_info.manufacturer_data}")
         
         now = time.time()
         mac = service_info.address
@@ -236,6 +224,21 @@ class ElehantHistoryScanner:
             device_info["last_value"] = parsed["value"]
             device_info["last_temperature"] = parsed["temperature"]
             device_info["last_raw"] = parsed["raw_data"]
+            
+            # Используем тип устройства из конфигурации, а не из MAC
+            # Если устройство уже настроено, используем его тип
+            configured_device_type = None
+            for key, meter_config in self.hass.data.get(DOMAIN, {}).items():
+                if key.startswith("meter_") and meter_config.get(CONF_DEVICE_SERIAL) == mac_info["serial"]:
+                    configured_device_type = meter_config.get(CONF_DEVICE_TYPE)
+                    break
+            
+            # Если тип устройства известен из настройки, используем его
+            if configured_device_type:
+                device_info["device_type"] = configured_device_type
+            elif device_info["device_type"] is None:
+                # Если тип все еще не определен, используем информацию из MAC как резерв
+                device_info["device_type"] = mac_info["device_type"]
             
             # Если этот счетчик уже настроен, шлем обновление
             self._notify_meter_update(mac_info["serial"], parsed, service_info.rssi)

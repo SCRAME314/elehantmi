@@ -25,7 +25,6 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_SERIAL,
     CONF_DEVICE_TYPE,
-    CONF_LOCATION,
     CONF_UNITS,
     DEVICE_TYPE_GAS,
     DEVICE_TYPE_WATER,
@@ -62,7 +61,7 @@ async def async_setup_entry(
         device_type = meter_config[CONF_DEVICE_TYPE]
         device_name = meter_config[CONF_DEVICE_NAME]
         units = meter_config[CONF_UNITS]
-        location = meter_config.get(CONF_LOCATION, "")
+        location = ""
         
         # Create coordinator for this meter if not exists
         coord_key = f"coordinator_{serial}"

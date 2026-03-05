@@ -147,12 +147,24 @@ class ElehantMeterSensor(ElehantBaseSensor):
         if "value" not in data:
             return None
         raw_value = data["value"]
+        
+        # According to packet structure:
+        # Raw value represents 0.1 liters (stored as integer)
+        # So for liters we divide by 10 (raw_value / 10)
+        # For cubic meters we divide by 10000 (raw_value / 10000) since 1 m³ = 1000 L and value is in 0.1 L
         if self._device_type == DEVICE_TYPE_GAS:
-            return raw_value / 10
-        else:
-            if self._units == UNIT_CUBIC_METERS:
-                return raw_value / 1000
+            if self._attr_native_unit_of_measurement == UnitOfVolume.CUBIC_METERS:
+                # For gas in cubic meters: raw_value / 10000 (raw_value * 0.0001)
+                return raw_value / 10000
             else:
+                # For gas in liters: raw_value / 10 (since raw value represents 0.1 liters)
+                return raw_value / 10
+        else:  # Water meter
+            if self._attr_native_unit_of_measurement == UnitOfVolume.CUBIC_METERS:
+                # For water in cubic meters: raw_value / 10000 (raw_value * 0.0001)
+                return raw_value / 10000
+            else:
+                # For water in liters: raw_value / 10 (since raw value represents 0.1 liters)
                 return raw_value / 10
 
 

@@ -48,9 +48,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_type = meter_config[CONF_DEVICE_TYPE]
         device_name = meter_config[CONF_DEVICE_NAME]
         
+        # Используем комбинацию serial и device_type для уникальной идентификации устройства
+        # Это предотвращает дублирование устройств когда один серийный номер используется для разных типов (газ/вода)
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, str(serial))},
+            identifiers={(DOMAIN, f"{serial}_{device_type}")},
             name=device_name,
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",

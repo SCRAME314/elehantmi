@@ -103,12 +103,14 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
         self._device_name = device_name
         self._sensor_type = sensor_type
         self._location = location
-        self._attr_unique_id = f"{serial}_{sensor_type}"
+        # Уникальный ID сенсора включает тип устройства для избежания коллизий
+        self._attr_unique_id = f"{serial}_{device_type}_{sensor_type}"
         self._attr_should_poll = False
         
-        # Set device info (via_device убрано, чтобы не было предупреждений)
+        # Set device info - используем комбинацию serial и device_type для уникальной идентификации устройства
+        # Это предотвращает дублирование устройств когда один серийный номер используется для разных типов (газ/вода)
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(serial))},
+            identifiers={(DOMAIN, f"{serial}_{device_type}")},
             name=device_name,
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
@@ -119,7 +121,14 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         if self.coordinator.data:
-            self._attr_native_value = self._get_state_from_data(self.coordinator.data)
+            value = self._get_state_from_data(self.coordinator.data)
+            # Для числовых сенсоров (water, gas) с state_class total_increasing
+            # нельзя устанавливать строковые значения. Если значение None,
+            # оставляем предыдущее значение или устанавливаем None (HA обработает как unavailable)
+            if value is not None:
+                self._attr_native_value = value
+            # Если value is None, не меняем _attr_native_value, чтобы HA использовал
+            # последнее известное значение или показал unavailable
         self.async_write_ha_state()
 
     def _get_state_from_data(self, data: dict) -> Any:
@@ -148,7 +157,15 @@ class ElehantMeterSensor(ElehantBaseSensor, RestoreEntity):
         """Restore last known state."""
         await super().async_added_to_hass()
         if (last_state := await self.async_get_last_state()) is not None:
-            self._attr_native_value = last_state.state
+            # При восстановлении состояния проверяем, что значение числовое
+            # Если состояние 'unknown' или не может быть преобразовано в float,
+            # устанавливаем None вместо строкового значения
+            try:
+                restored_value = float(last_state.state)
+                self._attr_native_value = restored_value
+            except (ValueError, TypeError):
+                # Если не удалось преобразовать (например, 'unknown'), оставляем None
+                self._attr_native_value = None
 
     def _get_state_from_data(self, data: dict) -> float | None:
         if "value" not in data:

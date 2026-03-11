@@ -50,16 +50,34 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elehant sensors based on a config entry."""
-    entities = []
+    from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
     
-    # Важно: итерируемся по копии ключей, чтобы избежать ошибки изменения словаря
+    entities = []
+    seen_unique_ids: set[str] = set()
+    
+    # Получаем реестр сущностей для проверки существующих unique_id
+    entity_registry = async_get_entity_registry(hass)
+    
+    # Получаем список serial+device_type только для текущей config_entry
+    # Это предотвращает создание дублирующихся сенсоров при наличии нескольких entry
+    meters_to_process: list[tuple[int, str, dict]] = []
     for key in list(hass.data[DOMAIN].keys()):
         if not key.startswith("meter_"):
             continue
         
         meter_config = hass.data[DOMAIN][key]
+        # Проверяем, что meter принадлежит текущей config_entry
+        if meter_config.get("_entry_id") != config_entry.entry_id:
+            _LOGGER.debug(f"Skipping meter {key} - belongs to different entry: {meter_config.get('_entry_id')}")
+            continue
+        
         serial = meter_config[CONF_DEVICE_SERIAL]
         device_type = meter_config[CONF_DEVICE_TYPE]
+        meters_to_process.append((serial, device_type, meter_config))
+        _LOGGER.debug(f"Will process meter {serial} ({device_type}) for entry {config_entry.entry_id}")
+    
+    # Создаем сенсоры только для meter'ов текущей entry
+    for serial, device_type, meter_config in meters_to_process:
         device_name = meter_config[CONF_DEVICE_NAME]
         units = meter_config[CONF_UNITS]
         location = ""
@@ -72,15 +90,59 @@ async def async_setup_entry(
         else:
             coordinator = hass.data[DOMAIN][coord_key]
         
-        entities.extend([
-            ElehantMeterSensor(coordinator, serial, device_type, device_name, units, location),
-            ElehantTemperatureSensor(coordinator, serial, device_type, device_name, location),
-            ElehantBatterySensor(coordinator, serial, device_type, device_name, location),
-        ])
-        _LOGGER.debug(f"Created sensors for meter {serial}")
+        # Создаем список сенсоров для этого счетчика
+        sensor_classes: list[tuple[type, tuple]] = [
+            (ElehantMeterSensor, (coordinator, serial, device_type, device_name, units, location)),
+            (ElehantTemperatureSensor, (coordinator, serial, device_type, device_name, location)),
+            (ElehantBatterySensor, (coordinator, serial, device_type, device_name, location)),
+        ]
+        
+        for sensor_class, args in sensor_classes:
+            # Создаем временный экземпляр для получения unique_id
+            temp_sensor = sensor_class(*args)
+            unique_id = temp_sensor.unique_id
+            
+            # Проверяем, не создавали ли мы уже этот unique_id в рамках текущего вызова
+            if unique_id in seen_unique_ids:
+                _LOGGER.debug(f"Entity {unique_id} already processed in this call, skipping")
+                continue
+            seen_unique_ids.add(unique_id)
+            
+            # Проверяем, не существует ли уже такая сущность в реестре
+            existing_entity_id = entity_registry.async_get_entity_id(
+                "sensor", DOMAIN, unique_id
+            )
+            
+            # Если сущность уже существует в реестре, пропускаем создание
+            if existing_entity_id:
+                existing_entry = entity_registry.async_get(existing_entity_id)
+                if existing_entry:
+                    _LOGGER.debug(
+                        f"Entity {unique_id} already exists in registry "
+                        f"(entity_id={existing_entity_id}), skipping"
+                    )
+                continue
+            
+            # Дополнительная проверка: существует ли сущность в hass.states
+            # Это защищает от повторного создания при повторном вызове async_setup_entry
+            if unique_id in hass.data.setdefault(DOMAIN, {}).setdefault("added_entities", set()):
+                _LOGGER.debug(f"Entity {unique_id} was already added in previous setup call, skipping")
+                continue
+            
+            # Создаем полноценный экземпляр
+            sensor = sensor_class(*args)
+            entities.append(sensor)
+            # Отмечаем сущность как добавленную
+            hass.data[DOMAIN]["added_entities"].add(unique_id)
+            _LOGGER.debug(f"Added sensor {unique_id} to entities list")
+        
+        _LOGGER.debug(f"Finished processing sensors for meter {serial} ({device_type})")
     
     if entities:
+        _LOGGER.info(f"Adding {len(entities)} new entities for entry {config_entry.entry_id}")
         async_add_entities(entities)
+    else:
+        _LOGGER.debug(f"No new entities to add for entry {config_entry.entry_id}")
 
 
 class ElehantBaseSensor(CoordinatorEntity, SensorEntity):

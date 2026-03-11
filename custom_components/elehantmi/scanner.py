@@ -229,7 +229,7 @@ class ElehantHistoryScanner:
             # Если устройство уже настроено, используем его тип
             configured_device_type = None
             for key, meter_config in self.hass.data.get(DOMAIN, {}).items():
-                if key.startswith("meter_") and meter_config.get(CONF_DEVICE_SERIAL) == mac_info["serial"]:
+                if key.startswith("meter_") and str(meter_config.get(CONF_DEVICE_SERIAL)) == str(mac_info["serial"]):
                     configured_device_type = meter_config.get(CONF_DEVICE_TYPE)
                     break
             

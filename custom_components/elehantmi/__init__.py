@@ -58,8 +58,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
             sw_version="1.0",
         )
-        hass.data[DOMAIN][f"meter_{serial}"] = meter_config
-        _LOGGER.debug(f"Registered meter {serial}")
+        # Сохраняем meter_config с привязкой к entry_id
+        meter_key = f"meter_{serial}_{device_type}"
+        hass.data[DOMAIN][meter_key] = {
+            **meter_config,
+            "_entry_id": entry.entry_id,
+        }
+        _LOGGER.debug(f"Registered meter {serial} ({device_type}) for entry {entry.entry_id}")
     
     # Запускаем сенсоры
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -72,10 +77,38 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
     if unload_ok:
-        # Удаляем данные конкретного счетчика
+        # Удаляем данные конкретного счетчика для этой entry
         for key in list(hass.data[DOMAIN].keys()):
-            if key.startswith("meter_") or key.startswith("coordinator_"):
-                hass.data[DOMAIN].pop(key, None)
+            if key.startswith("meter_"):
+                meter_data = hass.data[DOMAIN][key]
+                if meter_data.get("_entry_id") == entry.entry_id:
+                    hass.data[DOMAIN].pop(key, None)
+        
+        # Очищаем set добавленных сущностей для этой entry
+        # Это позволяет корректно пересоздать сущности при повторной загрузке
+        if "added_entities" in hass.data[DOMAIN]:
+            # Находим все unique_id, которые принадлежат этой entry
+            entry_unique_ids = set()
+            for key in list(hass.data[DOMAIN].keys()):
+                if key.startswith("meter_"):
+                    meter_data = hass.data[DOMAIN][key]
+                    if meter_data.get("_entry_id") == entry.entry_id:
+                        serial = meter_data[CONF_DEVICE_SERIAL]
+                        device_type = meter_data[CONF_DEVICE_TYPE]
+                        # Добавляем все возможные unique_id для этого meter
+                        for sensor_type in ["meter", "temperature", "battery"]:
+                            entry_unique_ids.add(f"{serial}_{device_type}_{sensor_type}")
+            
+            # Удаляем unique_id этой entry из added_entities
+            hass.data[DOMAIN]["added_entities"] -= entry_unique_ids
+        
+        # Удаляем координаторы, которые больше не используются
+        for key in list(hass.data[DOMAIN].keys()):
+            if key.startswith("coordinator_"):
+                serial = key.replace("coordinator_", "")
+                # Проверяем, есть ли еще активные meter_ с этим serial
+                if not any(k.startswith(f"meter_{serial}_") for k in hass.data[DOMAIN].keys()):
+                    hass.data[DOMAIN].pop(key, None)
         
         # Сканер НЕ останавливаем, если есть другие активные entry
         # Он остановится, когда удалится последняя entry (через callback в async_setup_entry)

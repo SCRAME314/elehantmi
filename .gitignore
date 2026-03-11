@@ -1,65 +1,29 @@
-# Compiled and build artifacts
-*.pyc
-__pycache__/
-*.o
-*.obj
-*.so
-*.dll
-*.exe
-*.class
-*.out
-
-# Dependencies
-.venv/
-venv/
-.env
-.env.local
-*.env.*
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-*.swo
-
-# Editors
-.vscode/
-.idea/
-
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# Python specific
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# MyPy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# PyTest
-.pytest_cache/
-
-# General
-.DS_Store
-Thumbs.db
+(custom_components/elehantmi/__pycache__/,
+custom_components/elehantmi/*.pyc,
+*.log,
+*.tmp,
+*.swp,
+.env,
+.env.local,
+.env.*,
+.vscode/,
+.idea/,
+__pycache__/,
+*.py[co],
+*$py.class,
+*.so,
+*.egg-info/,
+dist/,
+build/,
+.coverage,
+htmlcov/,
+.pytest_cache/,
+.mypy_cache/,
+.hass/,
+*.db,
+*.db-journal,
+*.log,
+*.tmp,
+*~,
+.DS_Store,
+Thumbs.db)

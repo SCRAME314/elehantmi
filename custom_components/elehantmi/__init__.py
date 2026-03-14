@@ -72,7 +72,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         # Удаляем данные конкретного счетчика
         for key in list(hass.data[DOMAIN].keys()):
-            if key.startswith("meter_") or key.startswith("coordinator_"):
+            if key.startswith("meter_") or key.startswith("coordinator_") or key.startswith("entity_"):
                 hass.data[DOMAIN].pop(key, None)
         
         # Сканер НЕ останавливаем, если есть другие активные entry

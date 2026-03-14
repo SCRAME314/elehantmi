@@ -72,12 +72,30 @@ async def async_setup_entry(
         else:
             coordinator = hass.data[DOMAIN][coord_key]
         
-        entities.extend([
-            ElehantMeterSensor(coordinator, serial, device_type, device_name, units, location),
-            ElehantTemperatureSensor(coordinator, serial, device_type, device_name, location),
-            ElehantBatterySensor(coordinator, serial, device_type, device_name, location),
-        ])
-        _LOGGER.debug(f"Created sensors for meter {serial}")
+        # Check if entities with these unique_ids already exist to prevent duplication
+        existing_unique_ids = set()
+        for entity_key in list(hass.data[DOMAIN].keys()):
+            if entity_key.startswith("entity_"):
+                existing_unique_ids.add(hass.data[DOMAIN][entity_key])
+        
+        # Create sensors with unique IDs that include device type
+        sensor_configs = [
+            (ElehantMeterSensor, f"{serial}_{device_type}_{SENSOR_TYPE_METER}"),
+            (ElehantTemperatureSensor, f"{serial}_{device_type}_{SENSOR_TYPE_TEMPERATURE}"),
+            (ElehantBatterySensor, f"{serial}_{device_type}_{SENSOR_TYPE_BATTERY}"),
+        ]
+        
+        for sensor_class, unique_id in sensor_configs:
+            if unique_id not in existing_unique_ids:
+                if sensor_class == ElehantMeterSensor:
+                    entity = sensor_class(coordinator, serial, device_type, device_name, units, location)
+                else:
+                    entity = sensor_class(coordinator, serial, device_type, device_name, location)
+                entities.append(entity)
+                hass.data[DOMAIN][f"entity_{unique_id}"] = unique_id
+                _LOGGER.debug(f"Created sensor with unique_id: {unique_id}")
+            else:
+                _LOGGER.debug(f"Skipping duplicate sensor with unique_id: {unique_id}")
     
     if entities:
         async_add_entities(entities)
@@ -103,7 +121,8 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
         self._device_name = device_name
         self._sensor_type = sensor_type
         self._location = location
-        self._attr_unique_id = f"{serial}_{sensor_type}"
+        # Unique ID now includes device_type to ensure uniqueness across different meter types
+        self._attr_unique_id = f"{serial}_{device_type}_{sensor_type}"
         self._attr_should_poll = False
         
         # Set device info (via_device убрано, чтобы не было предупреждений)
@@ -114,12 +133,38 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
             sw_version="1.0",
         )
+        
+        # Store last valid value for recovery from invalid states
+        self._last_valid_value = None
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         if self.coordinator.data:
-            self._attr_native_value = self._get_state_from_data(self.coordinator.data)
+            value = self._get_state_from_data(self.coordinator.data)
+            
+            # Validate the value before setting it
+            if value is not None:
+                try:
+                    # Try to convert to float - this will catch 'unknown' strings and other invalid values
+                    numeric_value = float(value)
+                    self._attr_native_value = numeric_value
+                    self._last_valid_value = numeric_value
+                except (ValueError, TypeError):
+                    # Value cannot be converted to float (e.g., 'unknown' string)
+                    # Don't set the value, keep the last valid one or leave as None
+                    _LOGGER.debug(
+                        f"Invalid value '{value}' ({type(value).__name__}) for sensor {self._attr_unique_id}, "
+                        f"keeping last valid value: {self._last_valid_value}"
+                    )
+                    # Keep the last valid value if available, otherwise state will be None/unavailable
+                    if self._last_valid_value is not None:
+                        self._attr_native_value = self._last_valid_value
+                    # If no last valid value, don't call async_write_ha_state() to avoid setting invalid state
+                    else:
+                        return  # Skip state update entirely
+            # If value is None, we don't update - sensor stays in its current state
+        
         self.async_write_ha_state()
 
     def _get_state_from_data(self, data: dict) -> Any:
@@ -148,12 +193,29 @@ class ElehantMeterSensor(ElehantBaseSensor, RestoreEntity):
         """Restore last known state."""
         await super().async_added_to_hass()
         if (last_state := await self.async_get_last_state()) is not None:
-            self._attr_native_value = last_state.state
+            try:
+                # Restore only if the last state was a valid number
+                restored_value = float(last_state.state)
+                self._attr_native_value = restored_value
+                self._last_valid_value = restored_value
+            except (ValueError, TypeError):
+                # Last state was not numeric (e.g., 'unknown'), don't restore it
+                _LOGGER.debug(
+                    f"Last state '{last_state.state}' for {self._attr_unique_id} was not numeric, skipping restoration"
+                )
 
     def _get_state_from_data(self, data: dict) -> float | None:
         if "value" not in data:
             return None
         raw_value = data["value"]
+        
+        # Validate raw_value is numeric before processing
+        if raw_value is None or not isinstance(raw_value, (int, float)):
+            try:
+                raw_value = int(raw_value)
+            except (ValueError, TypeError):
+                _LOGGER.debug(f"Invalid raw_value '{raw_value}' ({type(raw_value).__name__}), returning None")
+                return None
         
         # According to packet structure:
         # Raw value represents 0.1 liters (stored as integer)
@@ -186,7 +248,15 @@ class ElehantTemperatureSensor(ElehantBaseSensor):
         self._attr_state_class = STATE_CLASS_MEASUREMENT
 
     def _get_state_from_data(self, data: dict) -> float | None:
-        return data.get("temperature")
+        temp = data.get("temperature")
+        if temp is None:
+            return None
+        # Validate temperature is numeric
+        try:
+            return float(temp)
+        except (ValueError, TypeError):
+            _LOGGER.debug(f"Invalid temperature value '{temp}' ({type(temp).__name__}), returning None")
+            return None
 
 
 class ElehantBatterySensor(ElehantBaseSensor):
@@ -199,5 +269,6 @@ class ElehantBatterySensor(ElehantBaseSensor):
         self._attr_native_unit_of_measurement = PERCENTAGE
         self._attr_state_class = STATE_CLASS_MEASUREMENT
 
-    def _get_state_from_data(self, data: dict) -> int:
-        return 100  # Placeholder
+    def _get_state_from_data(self, data: dict) -> int | None:
+        # Return None to let the base class handle validation and last valid value
+        return 100  # Placeholder - always valid numeric value

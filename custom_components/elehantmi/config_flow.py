@@ -53,7 +53,8 @@ class ElehantMeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         if user_input is not None:
             serial = user_input[CONF_DEVICE_SERIAL]
-            await self.async_set_unique_id(str(serial))
+            device_type = user_input[CONF_DEVICE_TYPE]
+            await self.async_set_unique_id(f"{serial}_{device_type}")
             self._abort_if_unique_id_configured()
             
             return self.async_create_entry(

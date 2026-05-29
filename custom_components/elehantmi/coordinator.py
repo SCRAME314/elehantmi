@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 class ElehantDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Elehant meter data."""
 
-    def __init__(self, hass: HomeAssistant, serial: int) -> None:
+    def __init__(self, hass: HomeAssistant, device_key: str) -> None:
         """Initialize."""
         super().__init__(
             hass,
@@ -25,7 +25,7 @@ class ElehantDataUpdateCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
             update_interval=timedelta(seconds=60),  # Will be updated by scanner
         )
-        self.serial = serial
+        self.device_key = device_key
         self._data = {}
 
     async def _async_update_data(self) -> dict[str, Any]:

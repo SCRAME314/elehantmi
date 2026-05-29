@@ -47,19 +47,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         serial = meter_config[CONF_DEVICE_SERIAL]
         device_type = meter_config[CONF_DEVICE_TYPE]
         device_name = meter_config[CONF_DEVICE_NAME]
+        # Composite key: serial + device_type to distinguish water/gas meters
+        device_key = f"{serial}_{device_type}"
         
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, str(serial))},
+            identifiers={(DOMAIN, device_key)},
             name=device_name,
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
             sw_version="1.5.0",
         )
-        hass.data[DOMAIN][f"meter_{serial}"] = meter_config
-        _LOGGER.debug(f"Registered meter {serial}")
+        hass.data[DOMAIN][f"meter_{device_key}"] = meter_config
+        _LOGGER.debug(f"Registered meter {serial} ({device_type})")
     
-    # Запускаем сенсоры
+    # Запускаем сенсоры только для счётчиков из этого config entry
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
     return True
@@ -70,10 +72,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
     if unload_ok:
-        # Удаляем данные конкретного счетчика
-        for key in list(hass.data[DOMAIN].keys()):
-            if key.startswith("meter_") or key.startswith("coordinator_") or key.startswith("entity_"):
+        # Удаляем данные только для счётчиков из этого config entry
+        meters = entry.data.get(CONF_MANUAL_METERS, [])
+        if isinstance(meters, dict):
+            meters = [meters]
+        for meter_config in meters:
+            device_key = f"{meter_config[CONF_DEVICE_SERIAL]}_{meter_config[CONF_DEVICE_TYPE]}"
+            for prefix in ("meter_", "coordinator_", "entity_"):
+                key = f"{prefix}{device_key}"
                 hass.data[DOMAIN].pop(key, None)
+                # Also clean old-style keys (without device_type) for migration
+                old_key = f"{prefix}{meter_config[CONF_DEVICE_SERIAL]}"
+                hass.data[DOMAIN].pop(old_key, None)
         
         # Сканер НЕ останавливаем, если есть другие активные entry
         # Он остановится, когда удалится последняя entry (через callback в async_setup_entry)

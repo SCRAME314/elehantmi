@@ -44,6 +44,14 @@ from .coordinator import ElehantDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
+async def _get_meters_from_entry(entry: ConfigEntry) -> list[dict]:
+    """Extract meter configs from a config entry."""
+    meters = entry.data.get(CONF_MANUAL_METERS, [])
+    if isinstance(meters, dict):
+        meters = [meters]
+    return meters
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -52,50 +60,39 @@ async def async_setup_entry(
     """Set up Elehant sensors based on a config entry."""
     entities = []
     
-    # Важно: итерируемся по копии ключей, чтобы избежать ошибки изменения словаря
-    for key in list(hass.data[DOMAIN].keys()):
-        if not key.startswith("meter_"):
-            continue
-        
-        meter_config = hass.data[DOMAIN][key]
+    # Only iterate meters from THIS config entry — not all meters in hass.data
+    meters = _get_meters_from_entry(config_entry)
+    
+    for meter_config in meters:
         serial = meter_config[CONF_DEVICE_SERIAL]
         device_type = meter_config[CONF_DEVICE_TYPE]
         device_name = meter_config[CONF_DEVICE_NAME]
         units = meter_config[CONF_UNITS]
         location = ""
+        device_key = f"{serial}_{device_type}"
         
         # Create coordinator for this meter if not exists
-        coord_key = f"coordinator_{serial}"
+        coord_key = f"coordinator_{device_key}"
         if coord_key not in hass.data[DOMAIN]:
-            coordinator = ElehantDataUpdateCoordinator(hass, serial)
+            coordinator = ElehantDataUpdateCoordinator(hass, device_key)
             hass.data[DOMAIN][coord_key] = coordinator
         else:
             coordinator = hass.data[DOMAIN][coord_key]
         
-        # Check if entities with these unique_ids already exist to prevent duplication
-        existing_unique_ids = set()
-        for entity_key in list(hass.data[DOMAIN].keys()):
-            if entity_key.startswith("entity_"):
-                existing_unique_ids.add(hass.data[DOMAIN][entity_key])
-        
         # Create sensors with unique IDs that include device type
         sensor_configs = [
-            (ElehantMeterSensor, f"{serial}_{device_type}_{SENSOR_TYPE_METER}"),
-            (ElehantTemperatureSensor, f"{serial}_{device_type}_{SENSOR_TYPE_TEMPERATURE}"),
-            (ElehantBatterySensor, f"{serial}_{device_type}_{SENSOR_TYPE_BATTERY}"),
+            (ElehantMeterSensor, f"{device_key}_{SENSOR_TYPE_METER}"),
+            (ElehantTemperatureSensor, f"{device_key}_{SENSOR_TYPE_TEMPERATURE}"),
+            (ElehantBatterySensor, f"{device_key}_{SENSOR_TYPE_BATTERY}"),
         ]
         
         for sensor_class, unique_id in sensor_configs:
-            if unique_id not in existing_unique_ids:
-                if sensor_class == ElehantMeterSensor:
-                    entity = sensor_class(coordinator, serial, device_type, device_name, units, location)
-                else:
-                    entity = sensor_class(coordinator, serial, device_type, device_name, location)
-                entities.append(entity)
-                hass.data[DOMAIN][f"entity_{unique_id}"] = unique_id
-                _LOGGER.debug(f"Created sensor with unique_id: {unique_id}")
+            if sensor_class == ElehantMeterSensor:
+                entity = sensor_class(coordinator, serial, device_type, device_name, units, location)
             else:
-                _LOGGER.debug(f"Skipping duplicate sensor with unique_id: {unique_id}")
+                entity = sensor_class(coordinator, serial, device_type, device_name, location)
+            entities.append(entity)
+            _LOGGER.debug(f"Created sensor with unique_id: {unique_id}")
     
     if entities:
         async_add_entities(entities)
@@ -121,13 +118,14 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
         self._device_name = device_name
         self._sensor_type = sensor_type
         self._location = location
-        # Unique ID now includes device_type to ensure uniqueness across different meter types
-        self._attr_unique_id = f"{serial}_{device_type}_{sensor_type}"
+        # Composite device key: serial + type to separate water/gas meters
+        self._device_key = f"{serial}_{device_type}"
+        self._attr_unique_id = f"{self._device_key}_{sensor_type}"
         self._attr_should_poll = False
         
-        # Set device info (via_device убрано, чтобы не было предупреждений)
+        # Set device info with composite identifier
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(serial))},
+            identifiers={(DOMAIN, self._device_key)},
             name=device_name,
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",

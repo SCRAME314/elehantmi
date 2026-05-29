@@ -241,11 +241,17 @@ class ElehantHistoryScanner:
                 device_info["device_type"] = mac_info["device_type"]
             
             # Если этот счетчик уже настроен, шлем обновление
-            self._notify_meter_update(mac_info["serial"], parsed, service_info.rssi)
+            if configured_device_type:
+                self._notify_meter_update(mac_info["serial"], configured_device_type, parsed, service_info.rssi)
+            else:
+                self._notify_meter_update(mac_info["serial"], None, parsed, service_info.rssi)
 
-    def _notify_meter_update(self, serial: int, parsed: dict, rssi: int):
+    def _notify_meter_update(self, serial: int, device_type: str | None, parsed: dict, rssi: int):
         """Notify a configured meter about new data."""
-        coordinator_key = f"coordinator_{serial}"
+        if device_type is None:
+            return
+        device_key = f"{serial}_{device_type}"
+        coordinator_key = f"coordinator_{device_key}"
         if coordinator_key in self.hass.data.get(DOMAIN, {}):
             coordinator = self.hass.data[DOMAIN][coordinator_key]
             update_data = {

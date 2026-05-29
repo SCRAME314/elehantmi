@@ -56,7 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             name=device_name,
             manufacturer="Elehant",
             model="Gas Meter" if device_type == DEVICE_TYPE_GAS else "Water Meter",
-            sw_version="1.5.0",
+            sw_version="1.5.1",
         )
         hass.data[DOMAIN][f"meter_{device_key}"] = meter_config
         _LOGGER.debug(f"Registered meter {serial} ({device_type})")

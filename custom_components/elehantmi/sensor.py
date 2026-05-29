@@ -244,7 +244,7 @@ class ElehantMeterSensor(ElehantBaseSensor, RestoreEntity):
                 return raw_value / 10
 
 
-class ElehantTemperatureSensor(ElehantBaseSensor):
+class ElehantTemperatureSensor(ElehantBaseSensor, RestoreEntity):
     """Sensor for temperature readings."""
 
     def __init__(self, coordinator, serial, device_type, device_name, location=""):
@@ -254,11 +254,19 @@ class ElehantTemperatureSensor(ElehantBaseSensor):
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
         self._attr_state_class = STATE_CLASS_MEASUREMENT
 
+    async def async_added_to_hass(self) -> None:
+        """Restore last state if available."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                self._attr_native_value = float(last_state.state)
+            except (ValueError, TypeError):
+                pass
+
     def _get_state_from_data(self, data: dict) -> float | None:
         temp = data.get("temperature")
         if temp is None:
             return None
-        # Validate temperature is numeric
         try:
             return float(temp)
         except (ValueError, TypeError):
@@ -266,7 +274,7 @@ class ElehantTemperatureSensor(ElehantBaseSensor):
             return None
 
 
-class ElehantBatterySensor(ElehantBaseSensor):
+class ElehantBatterySensor(ElehantBaseSensor, RestoreEntity):
     """Sensor for battery level."""
 
     def __init__(self, coordinator, serial, device_type, device_name, location=""):
@@ -275,7 +283,17 @@ class ElehantBatterySensor(ElehantBaseSensor):
         self._attr_device_class = SensorDeviceClass.BATTERY
         self._attr_native_unit_of_measurement = PERCENTAGE
         self._attr_state_class = STATE_CLASS_MEASUREMENT
+        # Set default immediately, don't wait for coordinator
+        self._attr_native_value = 100
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last state if available."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                self._attr_native_value = float(last_state.state)
+            except (ValueError, TypeError):
+                pass  # Keep default 100
 
     def _get_state_from_data(self, data: dict) -> int | None:
-        # Return None to let the base class handle validation and last valid value
         return 100  # Placeholder - always valid numeric value

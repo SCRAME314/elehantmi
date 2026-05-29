@@ -247,21 +247,18 @@ class ElehantHistoryScanner:
                 self._notify_meter_update(mac_info["serial"], None, parsed, service_info.rssi)
 
     def _notify_meter_update(self, serial: int, device_type: str | None, parsed: dict, rssi: int):
-        """Notify a configured meter about new data."""
-        if device_type is None:
-            return
-        device_key = f"{serial}_{device_type}"
-        coordinator_key = f"coordinator_{device_key}"
-        if coordinator_key in self.hass.data.get(DOMAIN, {}):
-            coordinator = self.hass.data[DOMAIN][coordinator_key]
-            update_data = {
-                "serial": serial,
-                "value": parsed["value"],
-                "temperature": parsed["temperature"],
-                "rssi": rssi,
-            }
-            coordinator.update_data(update_data)
-            async_dispatcher_send(self.hass, SIGNAL_NEW_DATA, update_data)
+        """Notify all configured meters with matching serial number."""
+        update_data = {
+            "serial": serial,
+            "value": parsed["value"],
+            "temperature": parsed["temperature"],
+            "rssi": rssi,
+        }
+        domain_data = self.hass.data.get(DOMAIN, {})
+        for key, obj in domain_data.items():
+            if key.startswith(f"coordinator_{serial}_"):
+                obj.update_data(update_data)
+                async_dispatcher_send(self.hass, SIGNAL_NEW_DATA, update_data)
 
     def get_recent_devices(self, hours: int = 24) -> list[dict]:
         """Get devices seen in the last N hours."""

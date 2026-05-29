@@ -44,7 +44,7 @@ from .coordinator import ElehantDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _get_meters_from_entry(entry: ConfigEntry) -> list[dict]:
+def _get_meters_from_entry(entry: ConfigEntry) -> list[dict]:
     """Extract meter configs from a config entry."""
     meters = entry.data.get(CONF_MANUAL_METERS, [])
     if isinstance(meters, dict):

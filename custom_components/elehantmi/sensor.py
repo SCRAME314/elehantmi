@@ -135,6 +135,14 @@ class ElehantBaseSensor(CoordinatorEntity, SensorEntity):
         # Store last valid value for recovery from invalid states
         self._last_valid_value = None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes, including serial number."""
+        return {
+            "serial_number": self._serial,
+            "device_type": self._device_type,
+        }
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
